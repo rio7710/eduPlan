@@ -130,7 +130,8 @@ body.light-theme {
   cursor: pointer;
 }
 .title-menu-btn:hover,
-.title-menu:hover .title-menu-btn {
+.title-menu:hover .title-menu-btn,
+.title-menu.is-open .title-menu-btn {
   background: var(--bg-hover);
 }
 .title-menu-dropdown {
@@ -146,7 +147,7 @@ body.light-theme {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
   z-index: 30;
 }
-.title-menu:hover .title-menu-dropdown {
+.title-menu.is-open .title-menu-dropdown {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -472,7 +473,7 @@ body.light-theme {
   transition: color 0.1s;
   position: relative;
 }
-.tab:hover { color: var(--text-primary); background: #2a2d2e; }
+.tab:hover { color: var(--text-primary); background: var(--bg-hover); }
 .tab.active {
   background: var(--tab-active);
   color: var(--text-primary);
@@ -973,7 +974,9 @@ body.light-theme {
   border-radius: 3px;
   word-break: break-word;
 }
-.block-content[contenteditable]:focus { background: rgba(255,255,255,0.03); }
+.block-content[contenteditable]:focus {
+  background: color-mix(in srgb, var(--bg-active) 32%, transparent);
+}
 
 .heading-block {
   font-size: 20px;
@@ -1267,7 +1270,9 @@ body.light-theme {
   overflow-wrap: anywhere;
   overflow: hidden;
 }
-.source-block-textarea:focus { background: rgba(255,255,255,0.03); }
+.source-block-textarea:focus {
+  background: color-mix(in srgb, var(--bg-active) 32%, transparent);
+}
 
 /* ─── Preview Mode ─── */
 .preview-wrap {

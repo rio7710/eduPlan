@@ -13,8 +13,7 @@ export function WelcomeView({ onOpenUpload, onOpenEditor, onOpenReview, recentDo
     <div className="welcome-content">
       <div className="welcome-hero">
         <div className="welcome-logo">📚</div>
-        <h1>eduPlan</h1>
-        <p className="welcome-sub">PDF 기반 교육안 작성 도구</p>
+        <h1>edufixer</h1>
       </div>
 
       <div className="welcome-actions">

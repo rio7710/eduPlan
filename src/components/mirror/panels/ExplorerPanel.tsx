@@ -16,6 +16,7 @@ type Props = {
   activeDocumentPath: string | null;
   openDocumentIds: string[];
   openDocumentPaths: string[];
+  onOpenUnimplementedModal: () => void;
 };
 
 const EXPLORER_SORT_STORAGE_KEY = 'eduplan-explorer-sort';
@@ -55,6 +56,7 @@ export function ExplorerPanel({
   activeDocumentPath,
   openDocumentIds,
   openDocumentPaths,
+  onOpenUnimplementedModal,
 }: Props) {
   const [sortBy, setSortBy] = useState<'type' | 'name' | 'date'>(() => {
     const saved = window.localStorage.getItem(EXPLORER_SORT_STORAGE_KEY);
@@ -258,7 +260,18 @@ export function ExplorerPanel({
             <span className="tree-arrow">▾</span> 미구현
           </div>
           <div className="tree-items">
-            <div className="tree-item">
+            <div
+              className="tree-item"
+              role="button"
+              tabIndex={0}
+              onClick={onOpenUnimplementedModal}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onOpenUnimplementedModal();
+                }
+              }}
+            >
               <span className="tree-label">AI 연결 후 구현 예정</span>
             </div>
           </div>

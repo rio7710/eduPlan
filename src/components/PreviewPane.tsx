@@ -7,7 +7,7 @@ import { getCollapsedHeadingOwnerLine } from '@/lib/headingSections';
 type PreviewPaneProps = {
   markdownText: string;
   documentPath?: string | null;
-  scrollRequest?: { line: number; token: number } | null;
+  scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'View' | 'Both' } | null;
   selectedLine?: number | null;
   selectedEndLine?: number | null;
   activeLine?: number | null;
@@ -24,6 +24,7 @@ type PreviewPaneProps = {
   onMouseFocus?: () => void;
   onScrollRatioChange?: (ratio: number) => void;
   syncScrollRatio?: number | null;
+  onLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
 };
 
 type PreviewBlock = {
@@ -772,6 +773,7 @@ export function PreviewPane({
   onMouseFocus,
   onScrollRatioChange,
   syncScrollRatio = null,
+  onLocationTrigger,
 }: PreviewPaneProps) {
   const [imageUrlMap, setImageUrlMap] = useState<Record<string, string>>({});
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -930,17 +932,8 @@ export function PreviewPane({
     renderText?: string,
   ) {
     onSelectLine?.(selection);
-    const debug = getSelectionDebugInfo(selection.line, selection.endLine, renderText);
-    console.log('[PreviewPane] selected-range', {
-      reason,
-      mode: _selectionMode,
-      line: selection.line,
-      endLine: selection.endLine ?? selection.line,
-      activeLine: selection.activeLine ?? selection.line,
-      label: selection.label,
-      renderText: debug.sourceText,
-      blockRange: debug.blockRange,
-    });
+    void reason;
+    void renderText;
   }
 
   function normalizeClipboardText(text: string) {
@@ -1288,11 +1281,8 @@ export function PreviewPane({
     }
     updateActiveLineFromViewportTop();
     const handleLocationScroll = () => {
-      const line = updateActiveLineFromViewportTop();
-      console.log('[preview_scroll_location]', {
-        line,
-        scrollTop: container.scrollTop,
-      });
+      updateActiveLineFromViewportTop();
+      onLocationTrigger?.('scroll');
     };
     const handleLocationResize = () => {
       updateActiveLineFromViewportTop();
@@ -1303,7 +1293,7 @@ export function PreviewPane({
       container.removeEventListener('scroll', handleLocationScroll);
       window.removeEventListener('resize', handleLocationResize);
     };
-  }, [blocks, onActiveLineChange, searchSelection, suppressActiveLineSync]);
+  }, [blocks, onActiveLineChange, onLocationTrigger, searchSelection, suppressActiveLineSync]);
 
   useEffect(() => {
     const root = containerRef.current;
@@ -1554,10 +1544,6 @@ export function PreviewPane({
           void writeClipboardText(buildClipboardPayload(selectedText));
         }
 
-        console.log('[PreviewPane] selection', {
-          mode: _selectionMode,
-          text: selectedText,
-        });
         commitLocationAtClickEnd();
       }}
     >

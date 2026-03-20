@@ -2,6 +2,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { html as htmlLang } from '@codemirror/lang-html';
 import { foldEffect, foldedRanges, unfoldEffect } from '@codemirror/language';
+import { redo, undo } from '@codemirror/commands';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { EditorView } from '@codemirror/view';
@@ -15,7 +16,7 @@ interface CodeEditorProps {
   themeMode?: 'dark' | 'light';
   autoWrap?: boolean;
   active?: boolean;
-  scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number } | null;
+  scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'View' | 'Both' } | null;
   selectionRequest?: { line: number; token: number } | null;
   collapsedHeadingLines?: number[];
   onActiveLineChange?: (line: number | null) => void;
@@ -24,6 +25,7 @@ interface CodeEditorProps {
   onScrollRatioChange?: (ratio: number) => void;
   syncScrollRatio?: number | null;
   onSelectionRequestApplied?: () => void;
+  onLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
   onChange: (value: string) => void;
 }
 
@@ -44,6 +46,7 @@ export function CodeEditor({
   onScrollRatioChange,
   syncScrollRatio = null,
   onSelectionRequestApplied,
+  onLocationTrigger,
   onChange,
 }: CodeEditorProps) {
   const [editorView, setEditorView] = useState<EditorView | null>(null);
@@ -104,12 +107,6 @@ export function CodeEditor({
         const scroller = update.view.scrollDOM;
         const outer = findScrollableAncestor(scroller);
         const top = resolveTopVisibleLine(update.view, scroller, outer);
-        console.log('[editor_viewport_location]', {
-          mode,
-          line: top.line,
-          source: top.source,
-          scrollTop: scroller.scrollTop,
-        });
         reportActiveLine(top.line);
       }
 
@@ -123,7 +120,6 @@ export function CodeEditor({
             update,
           });
           if (monitorPayload) {
-            console.log('[js_change_monitor]', monitorPayload);
             lastLoggedAtRef.current = now;
           }
         }
@@ -178,6 +174,9 @@ export function CodeEditor({
     const handleEditorInteraction = () => {
       reportEditorInteraction();
     };
+    const handleKeyTrigger = () => {
+      onLocationTrigger?.('keyboard');
+    };
     const handleMouseFocus = () => {
       onMouseFocus?.();
       reportEditorInteraction();
@@ -187,26 +186,14 @@ export function CodeEditor({
       reportEditorInteraction();
       window.requestAnimationFrame(() => {
         const top = resolveTopVisibleLine(editorView, scroller, outerScrollTarget);
-        console.log('[editor_wheel_location]', {
-          mode,
-          line: top.line,
-          source: top.source,
-          scrollTop: scroller.scrollTop,
-          outerScrollTop: outerScrollTarget?.scrollTop ?? 0,
-        });
         reportActiveLine(top.line);
       });
+      onLocationTrigger?.('scroll');
     };
     const handleScroll = () => {
       const top = resolveTopVisibleLine(editorView, scroller, outerScrollTarget);
-      console.log('[editor_scroll_location]', {
-        mode,
-        line: top.line,
-        source: top.source,
-        scrollTop: scroller.scrollTop,
-        outerScrollTop: outerScrollTarget?.scrollTop ?? 0,
-      });
       reportActiveLine(top.line);
+      onLocationTrigger?.('scroll');
 
       if (suppressScrollEmitRef.current) {
         return;
@@ -235,6 +222,7 @@ export function CodeEditor({
 
     dom.addEventListener('focusin', handleEditorInteraction);
     dom.addEventListener('keydown', handleEditorInteraction, true);
+    dom.addEventListener('keydown', handleKeyTrigger, true);
     dom.addEventListener('mousedown', handleMouseFocus, true);
     dom.addEventListener('wheel', handleWheelFocus, { passive: true });
     scroller.addEventListener('scroll', handleScroll, { passive: true });
@@ -243,6 +231,7 @@ export function CodeEditor({
     return () => {
       dom.removeEventListener('focusin', handleEditorInteraction);
       dom.removeEventListener('keydown', handleEditorInteraction, true);
+      dom.removeEventListener('keydown', handleKeyTrigger, true);
       dom.removeEventListener('mousedown', handleMouseFocus, true);
       dom.removeEventListener('wheel', handleWheelFocus);
       scroller.removeEventListener('scroll', handleScroll);
@@ -252,7 +241,7 @@ export function CodeEditor({
         scrollEmitRafRef.current = null;
       }
     };
-  }, [active, editorView, onMouseFocus, onScrollRatioChange, reportEditorInteraction]);
+  }, [active, editorView, onLocationTrigger, onMouseFocus, onScrollRatioChange, reportEditorInteraction]);
 
   useEffect(() => {
     if (!editorView || syncScrollRatio === null || Number.isNaN(syncScrollRatio)) {
@@ -272,6 +261,32 @@ export function CodeEditor({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [editorView, syncScrollRatio]);
+
+  useEffect(() => {
+    if (!editorView || !active) {
+      return;
+    }
+
+    const handleEditorCommand = (event: Event) => {
+      const detail = (event as CustomEvent<{ command?: 'undo' | 'redo' }>).detail;
+      if (!detail?.command) {
+        return;
+      }
+
+      if (detail.command === 'undo') {
+        undo(editorView);
+        return;
+      }
+      if (detail.command === 'redo') {
+        redo(editorView);
+      }
+    };
+
+    window.addEventListener('edufixer-editor-command', handleEditorCommand as EventListener);
+    return () => {
+      window.removeEventListener('edufixer-editor-command', handleEditorCommand as EventListener);
+    };
+  }, [active, editorView]);
 
   useEffect(() => {
     if (!editorView || !scrollRequest) {

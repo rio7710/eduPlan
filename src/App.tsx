@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { ActivityBar } from '@/components/mirror/ActivityBar';
 import { ComponentMap } from '@/components/mirror/ComponentMap';
 import { ExplorerPanel } from '@/components/mirror/panels/ExplorerPanel';
@@ -26,6 +26,7 @@ export type PanelId = 'explorer' | 'md-menu' | 'search' | 'review' | 'dataset' |
 export type ViewId = 'welcome' | 'upload' | 'editor' | 'review' | 'dataset' | 'settings';
 export type EditorMode = 'wysiwyg' | 'markdown' | 'html' | 'preview' | 'split';
 export type PreviewSelectionMode = 'block' | 'line' | 'text';
+type ScrollRequestTarget = 'Edit' | 'View' | 'Both';
 const TRAINING_ACCESS_PASSWORD = 'jung25)(';
 const PREVIEW_SELECTION_MODE_STORAGE_KEY = 'eduplan-preview-selection-mode';
 const LAST_EDITOR_SESSION_STORAGE_KEY = 'eduplan-last-editor-session';
@@ -135,7 +136,7 @@ export function App() {
   const [explorerFolder, setExplorerFolder] = useState<OpenFolderResult | null>(null);
   const [currentDocument, setCurrentDocument] = useState<ShellDocument | null>(null);
   const [openDocuments, setOpenDocuments] = useState<Record<string, ShellDocument>>({});
-  const [scrollRequest, setScrollRequest] = useState<{ line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number } | null>(null);
+  const [scrollRequest, setScrollRequest] = useState<{ line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: ScrollRequestTarget; editorLine?: number; previewLine?: number } | null>(null);
   const [selectionRequest, setSelectionRequest] = useState<{ line: number; token: number } | null>(null);
   const [selectedPreviewLine, setSelectedPreviewLine] = useState<{ line: number; endLine?: number; activeLine?: number; label: string } | null>(null);
   const [searchPanelState, setSearchPanelState] = useState<SearchPanelState>({
@@ -153,12 +154,18 @@ export function App() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isTrainingAccessOpen, setIsTrainingAccessOpen] = useState(false);
+  const [isUnimplementedModalOpen, setIsUnimplementedModalOpen] = useState(false);
+  const [isFileDragOverApp, setIsFileDragOverApp] = useState(false);
   const [trainingPassword, setTrainingPassword] = useState('');
   const [locationSurface, setLocationSurface] = useState<'Edit' | 'View' | 'Menu' | null>('View');
   const [currentEditorLine, setCurrentEditorLine] = useState<number | null>(null);
   const [currentPreviewLine, setCurrentPreviewLine] = useState<number | null>(null);
   const [collapsedHeadingLines, setCollapsedHeadingLines] = useState<number[]>([]);
   const [tabs, setTabs] = useState<UiTab[]>([{ id: 'welcome', label: '시작', icon: '🏠' }]);
+  const splitSyncKeyRef = useRef<string>('');
+  const locationTriggerRef = useRef<{ surface: 'Edit' | 'View'; kind: 'scroll' | 'keyboard'; at: number } | null>(null);
+  const splitStoredLinesRef = useRef<{ editorLine: number; previewLine: number }>({ editorLine: 1, previewLine: 1 });
+  const splitStoreSignalRef = useRef<{ surface: 'Edit' | 'View'; at: number } | null>(null);
 
   async function refreshPersistedExplorerFolder(includeSubfolders = includeExplorerSubfolders) {
     const savedFolderPath = window.localStorage.getItem(LAST_EXPLORER_FOLDER_PATH_STORAGE_KEY);
@@ -298,6 +305,56 @@ export function App() {
     setIsTrainingAccessOpen(false);
   }
 
+  function handleOpenUnimplementedModal() {
+    setIsUnimplementedModalOpen(true);
+  }
+
+  function handleCloseUnimplementedModal() {
+    setIsUnimplementedModalOpen(false);
+  }
+
+  async function handleDropOpenFiles(paths: string[]) {
+    const uniquePaths = [...new Set(paths.map((value) => String(value || '').trim()).filter(Boolean))];
+    if (!uniquePaths.length) {
+      return;
+    }
+
+    for (const filePath of uniquePaths) {
+      // eslint-disable-next-line no-await-in-loop
+      await handleOpenRecent(filePath);
+    }
+    setToastMessage(uniquePaths.length > 1 ? `${uniquePaths.length}개 파일을 열었습니다.` : '파일을 열었습니다.');
+  }
+
+  function parseDroppedFilePaths(event: DragEvent<HTMLDivElement>) {
+    const fromFiles = Array.from(event.dataTransfer.files ?? [])
+      .map((file) => (file as File & { path?: string }).path)
+      .filter((value): value is string => Boolean(value));
+
+    if (fromFiles.length) {
+      return fromFiles;
+    }
+
+    const uriList = event.dataTransfer.getData('text/uri-list');
+    if (!uriList) {
+      return [];
+    }
+
+    return uriList
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .filter((item) => item.startsWith('file://'))
+      .map((item) => {
+        try {
+          return decodeURIComponent(item.replace(/^file:\/+/, '').replace(/\//g, '\\'));
+        } catch {
+          return '';
+        }
+      })
+      .filter(Boolean);
+  }
+
   function handleSubmitTrainingAccess() {
     if (trainingPassword !== TRAINING_ACCESS_PASSWORD) {
       handleCloseTrainingAccess();
@@ -309,7 +366,108 @@ export function App() {
     window.alert('학습 담당자 인증이 완료되었습니다.\n\n실제 학습 실행 연결은 다음 단계에서 붙입니다.');
   }
 
+  function isEditPanelMode(mode: EditorMode) {
+    return mode === 'markdown' || mode === 'html' || mode === 'wysiwyg';
+  }
+
+  function resolveLine(...candidates: Array<number | null | undefined>) {
+    for (const candidate of candidates) {
+      if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+        return normalizeSessionLine(candidate);
+      }
+    }
+    return 1;
+  }
+
+  function resolveSurfaceLine(surface: 'Edit' | 'View') {
+    if (surface === 'Edit') {
+      return resolveLine(currentEditorLine, splitStoredLinesRef.current.editorLine, currentPreviewLine);
+    }
+    return resolveLine(currentPreviewLine, splitStoredLinesRef.current.previewLine, currentEditorLine);
+  }
+
+  function resolveMenuLineFromSurface(surface: 'Edit' | 'View') {
+    const base = resolveSurfaceLine(surface);
+    const owner = getCollapsedHeadingOwnerLine(
+      currentDocument?.content ?? '',
+      base,
+      collapsedHeadingLines,
+    );
+    return resolveLine(owner, base);
+  }
+
+  function issueScrollSyncRequest(payload: {
+    target: ScrollRequestTarget;
+    line: number;
+    editorLine?: number;
+    previewLine?: number;
+    startColumn?: number;
+    endColumn?: number;
+  }) {
+    setScrollRequest({
+      line: payload.line,
+      token: Date.now() + Math.random(),
+      target: payload.target,
+      editorLine: payload.editorLine,
+      previewLine: payload.previewLine,
+      startColumn: payload.startColumn,
+      endColumn: payload.endColumn,
+    });
+  }
+
   function changeEditorMode(nextMode: EditorMode) {
+    const prevMode = editorMode;
+    const prevIsEdit = isEditPanelMode(prevMode);
+    const nextIsEdit = isEditPanelMode(nextMode);
+
+    if (prevMode === 'split') {
+      splitStoredLinesRef.current = {
+        editorLine: resolveMenuLineFromSurface('Edit'),
+        previewLine: resolveMenuLineFromSurface('View'),
+      };
+
+      if (nextMode === 'preview') {
+        const targetLine = splitStoredLinesRef.current.previewLine;
+        issueScrollSyncRequest({ target: 'View', line: targetLine });
+        setCurrentPreviewLine(targetLine);
+      } else if (nextMode === 'markdown' || nextMode === 'html' || nextMode === 'wysiwyg') {
+        const targetLine = splitStoredLinesRef.current.editorLine;
+        issueScrollSyncRequest({ target: 'Edit', line: targetLine });
+        setCurrentEditorLine(targetLine);
+      }
+    } else if (nextMode === 'split') {
+      let editorLine = resolveMenuLineFromSurface('Edit');
+      let previewLine = resolveMenuLineFromSurface('View');
+
+      // When entering split from a single active mode, prefer that mode's live line
+      // and mirror it to the other pane if counterpart line is missing/stale.
+      if (prevIsEdit) {
+        editorLine = resolveMenuLineFromSurface('Edit');
+        previewLine = editorLine;
+      } else if (prevMode === 'preview') {
+        previewLine = resolveMenuLineFromSurface('View');
+        editorLine = previewLine;
+      }
+
+      issueScrollSyncRequest({
+        target: 'Both',
+        line: previewLine,
+        editorLine,
+        previewLine,
+      });
+      splitStoredLinesRef.current = { editorLine, previewLine };
+    } else if (prevIsEdit && nextMode === 'preview') {
+      const targetLine = resolveMenuLineFromSurface('Edit');
+      setCurrentPreviewLine(targetLine);
+      issueScrollSyncRequest({ target: 'View', line: targetLine });
+    } else if (prevMode === 'preview' && nextIsEdit) {
+      const targetLine = resolveMenuLineFromSurface('View');
+      setCurrentEditorLine(targetLine);
+      issueScrollSyncRequest({ target: 'Edit', line: targetLine });
+    } else if (prevIsEdit && nextIsEdit && prevMode !== nextMode) {
+      const targetLine = resolveMenuLineFromSurface('Edit');
+      issueScrollSyncRequest({ target: 'Edit', line: targetLine });
+    }
     setEditorMode(nextMode);
     if (nextMode === 'preview') {
       setPreviewSelectionMode('block');
@@ -465,27 +623,75 @@ export function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const isCommand = event.ctrlKey || event.metaKey;
+      if (!isCommand) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+
+      if (key === 'n') {
+        event.preventDefault();
+        openView('upload');
+        return;
+      }
+
+      if (key === 'o') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          void handleOpenFolder();
+          return;
+        }
+        void handleOpenFile();
+        return;
+      }
+
       if (activeView !== 'editor' || !currentDocument) {
         return;
       }
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') {
+
+      if (key === 's') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          void handleSaveAsCurrentDocument();
+          return;
+        }
+        void handleSaveCurrentDocument();
         return;
       }
 
-      event.preventDefault();
-      if (event.shiftKey) {
-        void handleSaveAsCurrentDocument();
+      if (key === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          handleRedoCommand();
+          return;
+        }
+        handleUndoCommand();
         return;
       }
 
-      void handleSaveCurrentDocument();
+      if (key === 'y') {
+        event.preventDefault();
+        handleRedoCommand();
+        return;
+      }
+
+      if (key === 'f') {
+        event.preventDefault();
+        handleFindCommand();
+        return;
+      }
+
+      if (key === 'h') {
+        event.preventDefault();
+        handleReplaceCommand();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeView, currentDocument]);
+  }, [activeView, currentDocument, editorMode]);
 
   useEffect(() => {
     const handleWindowFocus = () => {
@@ -550,6 +756,59 @@ export function App() {
   }
 
   useEffect(() => {
+    if (activeView !== 'editor' || editorMode !== 'split' || !currentDocument) {
+      splitSyncKeyRef.current = '';
+      return;
+    }
+
+    if (locationSurface !== 'Edit' && locationSurface !== 'View') {
+      return;
+    }
+
+    const trigger = locationTriggerRef.current;
+    if (!trigger || trigger.surface !== locationSurface) {
+      return;
+    }
+    if (Date.now() - trigger.at > 500) {
+      return;
+    }
+
+    const sourceLine = resolveMenuLineFromSurface(locationSurface);
+    if (!sourceLine || Number.isNaN(sourceLine)) {
+      return;
+    }
+
+    const syncKey = `${currentDocument.id}:${locationSurface}:${sourceLine}`;
+    if (splitSyncKeyRef.current === syncKey) {
+      return;
+    }
+    splitSyncKeyRef.current = syncKey;
+
+    setScrollRequest({
+      line: sourceLine,
+      token: Date.now() + Math.random(),
+      target: locationSurface === 'View' ? 'Edit' : 'View',
+    });
+    locationTriggerRef.current = null;
+  }, [activeView, currentDocument, currentEditorLine, currentPreviewLine, editorMode, locationSurface]);
+
+  useEffect(() => {
+    const signal = splitStoreSignalRef.current;
+    if (!signal || Date.now() - signal.at > 700) {
+      return;
+    }
+    if (signal.surface === 'Edit' && currentEditorLine) {
+      splitStoredLinesRef.current.editorLine = normalizeSessionLine(currentEditorLine);
+      splitStoreSignalRef.current = null;
+      return;
+    }
+    if (signal.surface === 'View' && currentPreviewLine) {
+      splitStoredLinesRef.current.previewLine = normalizeSessionLine(currentPreviewLine);
+      splitStoreSignalRef.current = null;
+    }
+  }, [currentEditorLine, currentPreviewLine]);
+
+  useEffect(() => {
     if (editorMode === 'preview') {
       setLocationSurface((current) => (current === 'View' ? current : 'View'));
       return;
@@ -591,6 +850,7 @@ export function App() {
     setSelectedPreviewLine(null);
     setCurrentEditorLine(initialLine);
     setCurrentPreviewLine(initialLine);
+    splitStoredLinesRef.current = { editorLine: initialLine, previewLine: initialLine };
     setRecentDocuments((current) => upsertRecentDocument(current, doc));
     ensureTab({ id: doc.id, label: doc.fileName, icon: getFileIcon(doc.fileName) });
     openView('editor', doc.id);
@@ -655,6 +915,48 @@ export function App() {
     const doc = await window.eduFixerApi?.openFile();
     if (!doc) return;
     openShellDocument(doc);
+  }
+
+  function emitEditorCommand(command: 'undo' | 'redo') {
+    window.dispatchEvent(new CustomEvent('edufixer-editor-command', { detail: { command } }));
+  }
+
+  function handleUndoCommand() {
+    if (activeView !== 'editor') {
+      return;
+    }
+    if (editorMode === 'wysiwyg') {
+      document.execCommand('undo');
+      return;
+    }
+    emitEditorCommand('undo');
+  }
+
+  function handleRedoCommand() {
+    if (activeView !== 'editor') {
+      return;
+    }
+    if (editorMode === 'wysiwyg') {
+      document.execCommand('redo');
+      return;
+    }
+    emitEditorCommand('redo');
+  }
+
+  function handleFindCommand() {
+    if (activeView !== 'editor') {
+      return;
+    }
+    setActivePanel('search');
+    setSearchPanelState((current) => (current.mode === 'find' ? current : { ...current, mode: 'find' }));
+  }
+
+  function handleReplaceCommand() {
+    if (activeView !== 'editor') {
+      return;
+    }
+    setActivePanel('search');
+    setSearchPanelState((current) => (current.mode === 'replace' ? current : { ...current, mode: 'replace' }));
   }
 
   async function handleSaveCurrentDocument() {
@@ -1005,6 +1307,10 @@ export function App() {
     setActiveView('editor');
     setCurrentEditorLine(lineNumber);
     setCurrentPreviewLine(lineNumber);
+    splitStoredLinesRef.current = {
+      editorLine: normalizeSessionLine(lineNumber),
+      previewLine: normalizeSessionLine(lineNumber),
+    };
     setSelectionRequest({ line: lineNumber, token: Date.now() + Math.random() });
     if (options?.selectPreviewLine === false) {
       setSelectedPreviewLine(null);
@@ -1099,35 +1405,37 @@ export function App() {
     collapsedHeadingLines,
   );
 
-  useEffect(() => {
-    if (activeView !== 'editor' || !currentDocument) {
-      return;
-    }
-    console.log('[location_sync]', {
-      surface: locationSurface,
-      line: normalizedCurrentLine ?? null,
-      editorLine: currentEditorLine ?? null,
-      previewLine: currentPreviewLine ?? null,
-      mode: editorMode,
-      file: currentDocument.fileName,
-    });
-  }, [
-    activeView,
-    currentDocument,
-    locationSurface,
-    normalizedCurrentLine,
-    currentEditorLine,
-    currentPreviewLine,
-    editorMode,
-  ]);
   return (
-    <div className="app">
+    <div
+      className={`app ${isFileDragOverApp ? 'is-file-drag-over' : ''}`}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setIsFileDragOverApp(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          return;
+        }
+        setIsFileDragOverApp(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setIsFileDragOverApp(false);
+        const filePaths = parseDroppedFilePaths(event);
+        void handleDropOpenFiles(filePaths);
+      }}
+    >
       <TitleBar
         onOpenUpload={() => openView('upload')}
         onOpenFile={handleOpenFile}
         onOpenFolder={handleOpenFolder}
         onSave={() => { void handleSaveCurrentDocument(); }}
         onSaveAs={() => { void handleSaveAsCurrentDocument(); }}
+        onUndo={handleUndoCommand}
+        onRedo={handleRedoCommand}
+        onFind={handleFindCommand}
+        onReplace={handleReplaceCommand}
         canSave={activeView === 'editor' && Boolean(currentDocument)}
         canEdit={canEdit}
       />
@@ -1165,6 +1473,7 @@ export function App() {
               activeDocumentPath={currentDocument?.filePath ?? null}
               openDocumentIds={Object.keys(openDocuments)}
               openDocumentPaths={Object.values(openDocuments).map((doc) => doc.filePath).filter((path): path is string => Boolean(path))}
+              onOpenUnimplementedModal={handleOpenUnimplementedModal}
             />
           ) : null}
           {activePanel === 'md-menu' ? (
@@ -1278,6 +1587,14 @@ export function App() {
                 onSelectPreviewLine={() => {}}
                 onEditorActiveLineChange={(line) => setCurrentEditorLine((current) => (current === line ? current : line))}
                 onPreviewActiveLineChange={(line) => setCurrentPreviewLine((current) => (current === line ? current : line))}
+                onEditorLocationTrigger={(kind) => {
+                  locationTriggerRef.current = { surface: 'Edit', kind, at: Date.now() };
+                  splitStoreSignalRef.current = { surface: 'Edit', at: Date.now() };
+                }}
+                onPreviewLocationTrigger={(kind) => {
+                  locationTriggerRef.current = { surface: 'View', kind, at: Date.now() };
+                  splitStoreSignalRef.current = { surface: 'View', at: Date.now() };
+                }}
                 focusOwner="none"
                 splitSyncEnabled={false}
                 splitScrollSyncMode="none"
@@ -1328,6 +1645,19 @@ export function App() {
         selectionStatusLabel={selectionStatusLabel}
         onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
       />
+      {isUnimplementedModalOpen ? (
+        <div className="font-color-modal-backdrop" onClick={handleCloseUnimplementedModal}>
+          <div className="font-color-modal training-access-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="font-color-modal-header">
+              <div className="modal-title">미구현 안내</div>
+            </div>
+            <div className="modal-body">해당 기능은 아직 구현되지 않았습니다.</div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={handleCloseUnimplementedModal}>확인</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {isTrainingAccessOpen ? (
         <div className="font-color-modal-backdrop" onClick={handleCloseTrainingAccess}>
           <div className="font-color-modal training-access-modal" onClick={(event) => event.stopPropagation()}>

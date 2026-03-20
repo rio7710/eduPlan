@@ -21,7 +21,7 @@ type Props = {
   document: ShellDocument | null;
   theme: 'dark' | 'light';
   activeLine?: number | null;
-  scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number } | null;
+  scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'View' | 'Both'; editorLine?: number; previewLine?: number } | null;
   selectionRequest?: { line: number; token: number } | null;
   onSelectionRequestApplied?: () => void;
   selectedPreviewLine?: { line: number; endLine?: number; activeLine?: number; label: string } | null;
@@ -31,6 +31,8 @@ type Props = {
   onSelectPreviewLine: (selection: { line: number; endLine?: number; activeLine?: number; label: string } | null) => void;
   onEditorActiveLineChange?: (line: number | null) => void;
   onPreviewActiveLineChange?: (line: number | null) => void;
+  onEditorLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
+  onPreviewLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
   onPreviewInteraction?: () => void;
   onEditorInteraction?: () => void;
   focusOwner?: FocusOwner;
@@ -66,6 +68,8 @@ export function EditorView({
   onSelectPreviewLine,
   onEditorActiveLineChange,
   onPreviewActiveLineChange,
+  onEditorLocationTrigger,
+  onPreviewLocationTrigger,
   onPreviewInteraction,
   onEditorInteraction,
   focusOwner = 'none',
@@ -105,6 +109,30 @@ export function EditorView({
     isSplit && isBidirectionalSync && scrollLeader === 'editor'
       ? editorScrollRatio
       : null;
+  const splitEditorScrollRequest =
+    scrollRequest?.target === 'View'
+      ? null
+      : scrollRequest?.target === 'Both' && typeof scrollRequest.editorLine === 'number'
+        ? {
+          ...scrollRequest,
+          line: scrollRequest.editorLine,
+          endLine: scrollRequest.editorLine,
+          startColumn: undefined,
+          endColumn: undefined,
+        }
+        : scrollRequest;
+  const splitPreviewScrollRequest =
+    scrollRequest?.target === 'Edit'
+      ? null
+      : scrollRequest?.target === 'Both' && typeof scrollRequest.previewLine === 'number'
+        ? {
+          ...scrollRequest,
+          line: scrollRequest.previewLine,
+          endLine: scrollRequest.previewLine,
+          startColumn: undefined,
+          endColumn: undefined,
+        }
+        : scrollRequest;
 
   return (
     <>
@@ -146,7 +174,7 @@ export function EditorView({
           onMouseEnter={() => onLocationSurfaceChange?.('Edit')}
         >
           <div className="editor-mode-panel active">
-            <CodeEditor mode="markdown" value={content} documentPath={document?.filePath ?? null} documentName={document?.fileName ?? null} themeMode={theme} autoWrap={autoWrap} active scrollRequest={scrollRequest} selectionRequest={null} onSelectionRequestApplied={onSelectionRequestApplied} collapsedHeadingLines={collapsedHeadingLines} onActiveLineChange={onEditorActiveLineChange} onEditorInteraction={onEditorInteraction} onChange={onChangeContent} />
+            <CodeEditor mode="markdown" value={content} documentPath={document?.filePath ?? null} documentName={document?.fileName ?? null} themeMode={theme} autoWrap={autoWrap} active scrollRequest={scrollRequest} selectionRequest={null} onSelectionRequestApplied={onSelectionRequestApplied} collapsedHeadingLines={collapsedHeadingLines} onActiveLineChange={onEditorActiveLineChange} onLocationTrigger={onEditorLocationTrigger} onEditorInteraction={onEditorInteraction} onChange={onChangeContent} />
           </div>
         </div>
       ) : null}
@@ -157,7 +185,7 @@ export function EditorView({
           onMouseEnter={() => onLocationSurfaceChange?.('Edit')}
         >
           <div className="editor-mode-panel active">
-            <CodeEditor mode="html" value={htmlContent} documentPath={document?.filePath ?? null} documentName={document?.fileName ?? null} themeMode={theme} autoWrap={autoWrap} active scrollRequest={scrollRequest} selectionRequest={null} onSelectionRequestApplied={onSelectionRequestApplied} onActiveLineChange={onEditorActiveLineChange} onEditorInteraction={onEditorInteraction} onChange={(value) => onChangeContent(turndown.turndown(value))} />
+            <CodeEditor mode="html" value={htmlContent} documentPath={document?.filePath ?? null} documentName={document?.fileName ?? null} themeMode={theme} autoWrap={autoWrap} active scrollRequest={scrollRequest} selectionRequest={null} onSelectionRequestApplied={onSelectionRequestApplied} onActiveLineChange={onEditorActiveLineChange} onLocationTrigger={onEditorLocationTrigger} onEditorInteraction={onEditorInteraction} onChange={(value) => onChangeContent(turndown.turndown(value))} />
           </div>
         </div>
       ) : null}
@@ -184,6 +212,7 @@ export function EditorView({
               onToggleCollapsedHeading={onToggleCollapsedHeading}
               onSelectLine={onSelectPreviewLine}
               onActiveLineChange={onPreviewActiveLineChange}
+              onLocationTrigger={onPreviewLocationTrigger}
               suppressActiveLineSync={suppressPreviewActiveSync}
               onMouseFocus={onPreviewInteraction}
             />
@@ -206,11 +235,12 @@ export function EditorView({
                 themeMode={theme}
                 autoWrap={autoWrap}
                 active
-                scrollRequest={scrollRequest}
+                scrollRequest={splitEditorScrollRequest}
                 selectionRequest={selectionRequest}
                 onSelectionRequestApplied={onSelectionRequestApplied}
                 collapsedHeadingLines={collapsedHeadingLines}
                 onActiveLineChange={onEditorActiveLineChange}
+                onLocationTrigger={onEditorLocationTrigger}
                 onEditorInteraction={onEditorInteraction}
                 onMouseFocus={isBidirectionalSync ? () => setScrollLeader('editor') : undefined}
                 onScrollRatioChange={
@@ -235,7 +265,7 @@ export function EditorView({
                 key={`${document?.id ?? 'preview'}-split`}
                 markdownText={content}
                 documentPath={document?.filePath ?? null}
-                scrollRequest={scrollRequest}
+                scrollRequest={splitPreviewScrollRequest}
                 selectedLine={selectedPreviewLine?.line ?? null}
                 selectedEndLine={selectedPreviewLine?.endLine ?? null}
                 activeLine={activeLine}
@@ -247,6 +277,7 @@ export function EditorView({
                 onToggleCollapsedHeading={onToggleCollapsedHeading}
                 onSelectLine={onSelectPreviewLine}
                 onActiveLineChange={onPreviewActiveLineChange}
+                onLocationTrigger={onPreviewLocationTrigger}
                 suppressActiveLineSync={suppressPreviewActiveSync}
                 onMouseFocus={() => {
                   onPreviewInteraction?.();

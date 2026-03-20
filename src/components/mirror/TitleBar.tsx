@@ -1,44 +1,122 @@
+import { useEffect, useRef, useState } from 'react';
+
 type Props = {
   onOpenUpload: () => void;
   onOpenFile: () => void;
   onOpenFolder: () => void;
   onSave: () => void;
   onSaveAs: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  onFind: () => void;
+  onReplace: () => void;
   canSave: boolean;
   canEdit: boolean;
 };
 
-export function TitleBar({ onOpenUpload, onOpenFile, onOpenFolder, onSave, onSaveAs, canSave, canEdit }: Props) {
+export function TitleBar({
+  onOpenUpload,
+  onOpenFile,
+  onOpenFolder,
+  onSave,
+  onSaveAs,
+  onUndo,
+  onRedo,
+  onFind,
+  onReplace,
+  canSave,
+  canEdit,
+}: Props) {
+  const [openMenu, setOpenMenu] = useState<'file' | 'edit' | null>(null);
+  const menuRootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!menuRootRef.current?.contains(event.target as Node)) {
+        setOpenMenu(null);
+      }
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, []);
+
+  const runMenuAction = (action: () => void) => () => {
+    setOpenMenu(null);
+    action();
+  };
+
   return (
     <div className="titlebar">
       <div className="titlebar-left">
         <span className="titlebar-icon">📚</span>
-        <span className="titlebar-title">eduPlan</span>
-        <div className="titlebar-menubar">
-          <div className="title-menu">
-            <button className="title-menu-btn">파일(F)</button>
+        <span className="titlebar-title">edufixer</span>
+        <div className="titlebar-menubar" ref={menuRootRef}>
+          <div className={`title-menu ${openMenu === 'file' ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="title-menu-btn"
+              aria-expanded={openMenu === 'file'}
+              onClick={() => setOpenMenu((prev) => (prev === 'file' ? null : 'file'))}
+            >
+              파일(F)
+            </button>
             <div className="title-menu-dropdown">
-              <button className="title-menu-item" onClick={onOpenUpload}>새 문서</button>
-              <button className="title-menu-item" onClick={onOpenFile}>파일 열기</button>
-              <button className="title-menu-item" onClick={onOpenFolder}>폴더 열기</button>
+              <button type="button" className="title-menu-item" onClick={runMenuAction(onOpenUpload)}>
+                <span>새 문서</span>
+                <span className="title-menu-shortcut">Ctrl+N</span>
+              </button>
+              <button type="button" className="title-menu-item" onClick={runMenuAction(onOpenFile)}>
+                <span>파일 열기</span>
+                <span className="title-menu-shortcut">Ctrl+O</span>
+              </button>
+              <button type="button" className="title-menu-item" onClick={runMenuAction(onOpenFolder)}>
+                <span>폴더 열기</span>
+                <span className="title-menu-shortcut">Ctrl+Shift+O</span>
+              </button>
               <div className="title-menu-separator"></div>
-              <button className="title-menu-item" onClick={onSave} disabled={!canSave}>저장 Ctrl+S</button>
-              <button className="title-menu-item" onClick={onSaveAs} disabled={!canSave}>다른 이름으로 저장 Ctrl+Shift+S</button>
+              <button type="button" className="title-menu-item" onClick={runMenuAction(onSave)} disabled={!canSave}>
+                <span>저장</span>
+                <span className="title-menu-shortcut">Ctrl+S</span>
+              </button>
+              <button type="button" className="title-menu-item" onClick={runMenuAction(onSaveAs)} disabled={!canSave}>
+                <span>다른 이름으로 저장</span>
+                <span className="title-menu-shortcut">Ctrl+Shift+S</span>
+              </button>
             </div>
           </div>
-          <div className="title-menu">
-            <button className="title-menu-btn" disabled={!canEdit}>편집(E)</button>
+          <div className={`title-menu ${openMenu === 'edit' ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="title-menu-btn"
+              aria-expanded={openMenu === 'edit'}
+              disabled={!canEdit}
+              onClick={() => setOpenMenu((prev) => (prev === 'edit' ? null : 'edit'))}
+            >
+              편집(E)
+            </button>
             <div className="title-menu-dropdown">
-              <button className="title-menu-item" disabled={!canEdit}>되돌리기</button>
-              <button className="title-menu-item" disabled={!canEdit}>다시 실행</button>
+              <button type="button" className="title-menu-item" onClick={runMenuAction(onUndo)} disabled={!canEdit}>
+                <span>되돌리기</span>
+                <span className="title-menu-shortcut">Ctrl+Z</span>
+              </button>
+              <button type="button" className="title-menu-item" onClick={runMenuAction(onRedo)} disabled={!canEdit}>
+                <span>다시 실행</span>
+                <span className="title-menu-shortcut">Ctrl+Y</span>
+              </button>
               <div className="title-menu-separator"></div>
-              <button className="title-menu-item" disabled={!canEdit}>찾기</button>
-              <button className="title-menu-item" disabled={!canEdit}>바꾸기</button>
+              <button type="button" className="title-menu-item" onClick={runMenuAction(onFind)} disabled={!canEdit}>
+                <span>찾기</span>
+                <span className="title-menu-shortcut">Ctrl+F</span>
+              </button>
+              <button type="button" className="title-menu-item" onClick={runMenuAction(onReplace)} disabled={!canEdit}>
+                <span>바꾸기</span>
+                <span className="title-menu-shortcut">Ctrl+H</span>
+              </button>
             </div>
           </div>
         </div>
       </div>
-      <div className="titlebar-center">eduPlan - 교육안 작성 도구</div>
+      <div className="titlebar-center">eduFixer for enaru.net</div>
       <div className="titlebar-right">
         <button
           type="button"
