@@ -18,6 +18,7 @@ type Props = {
   items: ReviewItem[];
   onResolveItem: (item: ReviewItem, action: 'approve' | 'reject') => Promise<void> | void;
   onApproveAll: (items: ReviewItem[]) => Promise<void> | void;
+  onOpenEditorItem: (item: ReviewItem) => Promise<void> | void;
 };
 
 function toFileUrl(filePath: string) {
@@ -25,7 +26,7 @@ function toFileUrl(filePath: string) {
   return encodeURI(`file:///${normalized}`);
 }
 
-export function ReviewView({ items, onResolveItem, onApproveAll }: Props) {
+export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorItem }: Props) {
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [resolvingIds, setResolvingIds] = useState<string[]>([]);
   const [hierarchyLabels, setHierarchyLabels] = useState<Record<string, string>>({});
@@ -164,6 +165,13 @@ export function ReviewView({ items, onResolveItem, onApproveAll }: Props) {
 
                 <div className="review-actions">
                   <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => onOpenEditorItem(item)}
+                    disabled={isResolving}
+                  >
+                    에디트 이동
+                  </button>
+                  <button
                     className="btn btn-danger btn-sm"
                     onClick={() => handleResolve(item, 'reject')}
                     disabled={isResolving || item.status !== 'pending'}
@@ -177,6 +185,87 @@ export function ReviewView({ items, onResolveItem, onApproveAll }: Props) {
                   >
                     {isModified ? '수정승인' : '승인'}
                   </button>
+                </div>
+              </div>
+            );
+          }
+
+          if (item.type === 'sentence_edit') {
+            const isResolving = resolvingIds.includes(item.id);
+            const scoreClass = item.qualityScore >= 0.85 ? 'high' : item.qualityScore >= 0.7 ? 'mid' : 'low';
+            return (
+              <div key={item.id} className="review-card">
+                <div className="review-card-header">
+                  <div className="review-meta">
+                    <span className="action-badge keep">TEXT</span>
+                    <span className="review-engine-badge py">PY</span>
+                    <span className="review-doc">{item.sourcePdfName}</span>
+                    <span className="review-time">{item.createdAt.slice(0, 16).replace('T', ' ')}</span>
+                  </div>
+                  <div className="review-score">
+                    <span className="score-label">품질 점수</span>
+                    <span className={`score-value ${scoreClass}`}>{item.qualityScore.toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <div className="logo-review-layout">
+                  <div className="logo-review-preview-wrap">
+                    <div className="diff-header">원본 / 수정본</div>
+                    <div className="review-preview-box">
+                      <div className="review-preview-label">원본 focus</div>
+                      <div className="review-preview-text">{item.beforeFocus}</div>
+                    </div>
+                    <div className="review-preview-box">
+                      <div className="review-preview-label">수정 focus</div>
+                      <div className="review-preview-text">{item.afterFocus}</div>
+                    </div>
+                    <div className="review-preview-box">
+                      <div className="review-preview-label">컨텍스트</div>
+                      <div className="review-preview-text">{`${item.leftContext} [${item.beforeFocus} -> ${item.afterFocus}] ${item.rightContext}`.trim()}</div>
+                    </div>
+                    <div className="review-preview-box">
+                      <div className="review-preview-label">Diff</div>
+                      <div className="review-preview-text">{item.diffSummary}</div>
+                    </div>
+                  </div>
+
+                  <div className="logo-review-info">
+                    <div className="diff-header">검토 정보</div>
+                    <div className="logo-review-meta-list">
+                      <div className="logo-review-meta-row">
+                        <span className="logo-review-meta-label">수정 타입</span>
+                        <span className="logo-review-meta-value">{item.editType}</span>
+                      </div>
+                      <div className="logo-review-meta-row">
+                        <span className="logo-review-meta-label">내용 단위</span>
+                        <span className="logo-review-meta-value">{item.contentKind}</span>
+                      </div>
+                      <div className="logo-review-meta-row">
+                        <span className="logo-review-meta-label">추천 액션</span>
+                        <span className="logo-review-meta-value">{item.action}</span>
+                      </div>
+                      <div className="logo-review-meta-row">
+                        <span className="logo-review-meta-label">라인</span>
+                        <span className="logo-review-meta-value">{`${item.lineStart}-${item.lineEnd}`}</span>
+                      </div>
+                      <div className="logo-review-meta-row">
+                        <span className="logo-review-meta-label">상태</span>
+                        <span className={`logo-review-status ${item.status}`}>{item.status}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="review-actions">
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => onOpenEditorItem(item)}
+                    disabled={isResolving}
+                  >
+                    에디트 이동
+                  </button>
+                  <button className="btn btn-danger btn-sm" onClick={() => handleResolve(item, 'reject')} disabled={isResolving || item.status !== 'pending'}>거부</button>
+                  <button className="btn btn-success btn-sm" onClick={() => handleResolve(item, 'approve')} disabled={isResolving || item.status !== 'pending'}>승인</button>
                 </div>
               </div>
             );

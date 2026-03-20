@@ -7,6 +7,7 @@ type Props = {
   activeLine?: number | null;
   previewBlockCount?: number;
   selectionMode?: PreviewSelectionMode;
+  surface?: 'Edit' | 'View' | 'Menu' | null;
   selectedPreviewLine?: { line: number; endLine?: number; activeLine?: number; label: string } | null;
   collapsedHeadingLines?: number[];
   actionLabel?: string | null;
@@ -64,7 +65,8 @@ export function LocationBar({
   document,
   activeLine = null,
   previewBlockCount = 0,
-  selectionMode = 'block',
+  selectionMode = 'text',
+  surface = null,
   selectedPreviewLine = null,
   collapsedHeadingLines = [],
   actionLabel = null,
@@ -74,49 +76,41 @@ export function LocationBar({
   const fileName = document?.fileName ?? '문서 제목.md';
   const normalizedLine = getCollapsedHeadingOwnerLine(
     document?.content ?? '',
-    activeLine ?? selectedPreviewLine?.activeLine ?? selectedPreviewLine?.line ?? null,
+    activeLine ?? null,
     collapsedHeadingLines,
   );
   const headingTrail = getHeadingTrail(document?.content ?? '', normalizedLine);
-  const sectionHeading = headingTrail[0] ?? null;
-  const blockHeading = headingTrail.length > 1 ? headingTrail[headingTrail.length - 1] ?? null : null;
-  const sectionLabel = headingTrail[0]?.text ?? '—';
-  const blockLabel = headingTrail.length > 1 ? headingTrail[headingTrail.length - 1]?.text ?? '—' : selectedPreviewLine?.label ?? (
-    selectionMode === 'block'
-      ? '구분선 블록 선택 안 됨'
-      : selectionMode === 'line'
-        ? '라인 선택 안 됨'
-        : '문자 선택 모드'
-  );
-  const fallbackLabel =
-    selectionMode === 'block'
-      ? '구분선 블록 선택 안 됨'
-      : selectionMode === 'line'
-        ? '라인 선택 안 됨'
-        : '문자 선택 모드';
-  const activeLabel = blockLabel ?? fallbackLabel;
-  const lineStat = selectedPreviewLine
-    ? `${selectedPreviewLine.line}${selectedPreviewLine.endLine && selectedPreviewLine.endLine !== selectedPreviewLine.line ? `-${selectedPreviewLine.endLine}` : ''}행`
-    : selectionMode === 'block'
-      ? `문서 ${previewBlockCount}블록`
-      : '자유 선택';
+  const displayTrail =
+    headingTrail.length > 1 && headingTrail[0]?.level === 1
+      ? headingTrail.slice(1)
+      : headingTrail;
 
   return (
     <div className="location-bar" id="location-bar">
       <span className="loc-item loc-doc"><span className={`breadcrumb-icon ${getFileIconClass(fileName)}`}>{getFileIcon(fileName)}</span> <span id="loc-doc-name">{fileName}</span></span>
+      {displayTrail.map((heading, index) => (
+        <span key={`${heading.lineNumber}-${heading.level}-${heading.text}-${index}`} style={{ display: 'contents' }}>
+          <span className="loc-sep">›</span>
+          <span
+            className={`loc-item ${index === displayTrail.length - 1 ? 'loc-block' : ''}`.trim()}
+            style={{ color: `var(--preview-h${Math.min(heading.level, 6)}-color)` }}
+          >
+            {heading.text}
+          </span>
+        </span>
+      ))}
       <span className="loc-sep">›</span>
-      <span className="loc-item" id="loc-section" style={sectionHeading ? { color: `var(--preview-h${Math.min(sectionHeading.level, 6)}-color)` } : undefined}>{sectionLabel}</span>
-      <span className="loc-sep">›</span>
-      <span className="loc-item loc-block" id="loc-block" style={blockHeading ? { color: `var(--preview-h${Math.min(blockHeading.level, 6)}-color)` } : undefined}>{activeLabel}</span>
+      <span className="loc-item loc-surface-badge" id="loc-surface">{surface ?? 'View'}</span>
       <div className="loc-right">
         {actionLabel && onAction ? (
           <button className="secondary-button location-inline-action" onClick={onAction} disabled={actionDisabled}>
             {actionLabel}
           </button>
         ) : null}
-        <span className="loc-stat" id="loc-stat">{lineStat}</span>
-        <span className="loc-sep">·</span>
-        <span className="loc-stat" id="loc-chars">0자</span>
+        <span className="loc-stat" id="loc-stat">
+          {selectionMode === 'block' ? `문서 ${previewBlockCount}블록` : '헤더 기준'}
+          {normalizedLine ? ` · ${normalizedLine}행` : ''}
+        </span>
       </div>
     </div>
   );

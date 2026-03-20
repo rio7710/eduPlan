@@ -20,6 +20,10 @@ type PreviewPaneProps = {
   onBlockCountChange?: (count: number) => void;
   onSelectLine?: (selection: { line: number; endLine?: number; activeLine?: number; label: string } | null) => void;
   onActiveLineChange?: (line: number | null) => void;
+  suppressActiveLineSync?: boolean;
+  onMouseFocus?: () => void;
+  onScrollRatioChange?: (ratio: number) => void;
+  syncScrollRatio?: number | null;
 };
 
 type PreviewBlock = {
@@ -34,6 +38,8 @@ const PREVIEW_AUTO_COPY_STORAGE_KEY = 'eduplan-preview-auto-copy';
 const PREVIEW_COLON_BREAK_STORAGE_KEY = 'eduplan-preview-colon-break';
 const PREVIEW_STRIP_NUMBER_COPY_STORAGE_KEY = 'eduplan-preview-strip-number-copy';
 const IMAGE_REFERENCE_PATTERN = /^\[이미지\s+(\d+):\s+(.+)\]\s*$/;
+const LIGHTWEIGHT_PREVIEW = true;
+const STANDARD_MARKDOWN_VIEW = true;
 
 function resolveDocumentRelativePath(documentPath: string | null | undefined, relativePath: string) {
   if (!documentPath) {
@@ -312,7 +318,84 @@ function applyColonLineBreak(markdown: string) {
     .join('\n');
 }
 
-function getPreviewBlocks(markdownText: string, colonBreakEnabled: boolean) {
+function isHrDelimiterLine(rawLine: string) {
+  const trimmed = rawLine.trim().toLowerCase();
+  if (trimmed === '<hr>' || trimmed === '<hr/>' || trimmed === '<hr />') {
+    return true;
+  }
+  return /^\s*([-*_])(?:\s*\1){2,}\s*$/.test(rawLine);
+}
+
+function getPreviewBlocks(markdownText: string, colonBreakEnabled: boolean, lightweightMode: boolean) {
+  if (STANDARD_MARKDOWN_VIEW) {
+    const rawLines = markdownText.split(/\r?\n/);
+    const blocks: PreviewBlock[] = [];
+    let startIndex: number | null = null;
+    let blockNumber = 1;
+
+    function pushStandardBlock(endIndex: number) {
+      if (startIndex === null || endIndex < startIndex) {
+        return;
+      }
+      const markdown = rawLines.slice(startIndex, endIndex + 1).join('\n');
+      if (!markdown.trim()) {
+        return;
+      }
+      const html = attachHeadingLineAnchors(
+        DOMPurify.sanitize(marked.parse(markdown, { async: false }) as string),
+        markdown,
+        startIndex + 1,
+      );
+      blocks.push({
+        html,
+        markdown,
+        startLine: startIndex + 1,
+        endLine: endIndex + 1,
+        blockNumber,
+      });
+      blockNumber += 1;
+    }
+
+    rawLines.forEach((rawLine, index) => {
+      if (isHrDelimiterLine(rawLine)) {
+        pushStandardBlock(index - 1);
+        startIndex = null;
+        return;
+      }
+      if (startIndex === null && rawLine.trim()) {
+        startIndex = index;
+      }
+    });
+    pushStandardBlock(rawLines.length - 1);
+    return blocks;
+  }
+
+  if (lightweightMode) {
+    const lines = markdownText.split(/\r?\n/);
+    const markdown = lines.join('\n');
+    const previewMarkdownBase = stripPreviewComments(markdown);
+    const previewMarkdownRaw = colonBreakEnabled ? applyColonLineBreak(previewMarkdownBase) : previewMarkdownBase;
+    const previewMarkdown = escapeNumericRangeTildes(previewMarkdownRaw);
+    const html = previewMarkdown
+      ? attachHeadingLineAnchors(
+          DOMPurify.sanitize(marked.parse(previewMarkdown, { async: false }) as string),
+          markdown,
+          1,
+        )
+      : '';
+    return previewMarkdown
+      ? [
+          {
+            html,
+            markdown,
+            startLine: 1,
+            endLine: Math.max(1, lines.length),
+            blockNumber: 1,
+          } satisfies PreviewBlock,
+        ]
+      : [];
+  }
+
   const rawLines = markdownText.split(/\r?\n/);
   const blocks: PreviewBlock[] = [];
   let startIndex: number | null = null;
@@ -350,7 +433,7 @@ function getPreviewBlocks(markdownText: string, colonBreakEnabled: boolean) {
 
   rawLines.forEach((rawLine, index) => {
     const isBlank = !rawLine.trim();
-    const isRule = /^\s*([-*_])(?:\s*\1){2,}\s*$/.test(rawLine);
+    const isRule = isHrDelimiterLine(rawLine);
 
     if (isRule) {
       pushBlock(index - 1);
@@ -554,6 +637,122 @@ function getHeadingLevel(element: HTMLElement) {
   return match ? Number(match[1]) : null;
 }
 
+function resolveHeadingLineFromClick(
+  container: HTMLElement | null,
+  target: HTMLElement | null,
+  clientY: number,
+) {
+  if (!container) {
+    return null;
+  }
+
+  const directLine = Number(target?.closest<HTMLElement>('[data-md-line]')?.dataset.mdLine || 0);
+  if (directLine > 0) {
+    return directLine;
+  }
+
+  const headingElements = Array.from(container.querySelectorAll<HTMLElement>('[data-md-line]')).filter(
+    (element) => getHeadingLevel(element) !== null,
+  );
+  if (!headingElements.length) {
+    return null;
+  }
+
+  let activeHeading: HTMLElement | null = null;
+  headingElements.forEach((heading) => {
+    const rect = heading.getBoundingClientRect();
+    if (rect.top <= clientY + 1) {
+      activeHeading = heading;
+    }
+  });
+
+  const fallbackHeading = activeHeading ?? headingElements[0] ?? null;
+  const fallbackLine = Number(fallbackHeading?.dataset.mdLine || 0);
+  return fallbackLine > 0 ? fallbackLine : null;
+}
+
+function resolveSourceLineFromBlockPointer(target: HTMLElement | null, clientY: number) {
+  const blockElement = target?.closest<HTMLElement>('[data-start-line][data-end-line]') ?? null;
+  if (!blockElement) {
+    return null;
+  }
+
+  const startLine = Number(blockElement.dataset.startLine || 0);
+  const endLine = Number(blockElement.dataset.endLine || 0);
+  if (startLine <= 0 || endLine < startLine) {
+    return null;
+  }
+
+  const rect = blockElement.getBoundingClientRect();
+  const span = Math.max(1, endLine - startLine + 1);
+  if (rect.height <= 0) {
+    return startLine;
+  }
+
+  const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+  const offset = Math.round((span - 1) * ratio);
+  return startLine + offset;
+}
+
+function resolveSourceLineFromPointer(container: HTMLElement | null, target: HTMLElement | null, clientY: number) {
+  return resolveSourceLineFromBlockPointer(target, clientY) ?? resolveHeadingLineFromClick(container, target, clientY);
+}
+
+function findTextBoundaryInElement(element: HTMLElement, direction: 'start' | 'end') {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      return node.textContent?.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    },
+  });
+
+  if (direction === 'start') {
+    const first = walker.nextNode() as Text | null;
+    return first ? { node: first, offset: 0 } : null;
+  }
+
+  let last: Text | null = null;
+  let current = walker.nextNode();
+  while (current) {
+    last = current as Text;
+    current = walker.nextNode();
+  }
+  return last ? { node: last, offset: last.textContent?.length ?? 0 } : null;
+}
+
+function expandSelectionToStructuralElements(selection: Selection) {
+  if (!selection.rangeCount || selection.isCollapsed) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  const structuralSelector = 'li, p, h1, h2, h3, h4, h5, h6';
+  const startElement =
+    range.startContainer instanceof HTMLElement ? range.startContainer : range.startContainer.parentElement;
+  const endElement =
+    range.endContainer instanceof HTMLElement ? range.endContainer : range.endContainer.parentElement;
+  const startNode = startElement?.closest<HTMLElement>(structuralSelector) ?? null;
+  const endNode = endElement?.closest<HTMLElement>(structuralSelector) ?? null;
+  if (!startNode || !endNode) {
+    return false;
+  }
+
+  const ordered = startNode.compareDocumentPosition(endNode) & Node.DOCUMENT_POSITION_PRECEDING
+    ? [endNode, startNode]
+    : [startNode, endNode];
+  const startBoundary = findTextBoundaryInElement(ordered[0], 'start');
+  const endBoundary = findTextBoundaryInElement(ordered[1], 'end');
+  if (!startBoundary || !endBoundary) {
+    return false;
+  }
+
+  const nextRange = document.createRange();
+  nextRange.setStart(startBoundary.node, startBoundary.offset);
+  nextRange.setEnd(endBoundary.node, endBoundary.offset);
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+  return true;
+}
+
 export function PreviewPane({
   markdownText,
   documentPath = null,
@@ -567,7 +766,12 @@ export function PreviewPane({
   collapsedHeadingLines: _collapsedHeadingLines = [],
   onToggleCollapsedHeading,
   onBlockCountChange,
+  onSelectLine,
   onActiveLineChange,
+  suppressActiveLineSync = false,
+  onMouseFocus,
+  onScrollRatioChange,
+  syncScrollRatio = null,
 }: PreviewPaneProps) {
   const [imageUrlMap, setImageUrlMap] = useState<Record<string, string>>({});
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -581,6 +785,12 @@ export function PreviewPane({
     return window.localStorage.getItem(PREVIEW_STRIP_NUMBER_COPY_STORAGE_KEY) === 'on';
   });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [clickedBlockSelection, setClickedBlockSelection] = useState<{ startLine: number; endLine: number } | null>(null);
+  const suppressScrollEmitRef = useRef(false);
+  const lineSelectionAnchorLineRef = useRef<number | null>(null);
+  const lastEmittedScrollRatioRef = useRef(-1);
+  const pendingScrollRatioRef = useRef<number | null>(null);
+  const scrollEmitRafRef = useRef<number | null>(null);
   useEffect(() => {
     let cancelled = false;
     const imagePaths = extractImageReferencePaths(markdownText, documentPath);
@@ -610,11 +820,128 @@ export function PreviewPane({
   }, [markdownText, documentPath]);
 
   const previewMarkdownText = useMemo(
-    () => transformImageReferenceMarkdown(markdownText, imageUrlMap, documentPath),
+    () => (STANDARD_MARKDOWN_VIEW ? markdownText : transformImageReferenceMarkdown(markdownText, imageUrlMap, documentPath)),
     [markdownText, imageUrlMap, documentPath],
   );
-  const blocks = useMemo(() => getPreviewBlocks(previewMarkdownText, colonBreakEnabled), [previewMarkdownText, colonBreakEnabled]);
+  const isLightweightMode = LIGHTWEIGHT_PREVIEW && _selectionMode !== 'block';
+  const blocks = useMemo(
+    // Render blocks by --- in every mode for consistent preview shape.
+    // Lightweight mode still only controls expensive sync/highlight behaviors.
+    () => getPreviewBlocks(previewMarkdownText, colonBreakEnabled, false),
+    [previewMarkdownText, colonBreakEnabled],
+  );
   const normalizedScrollLine = getCollapsedHeadingOwnerLine(markdownText, scrollRequest?.line ?? null, _collapsedHeadingLines);
+
+  useEffect(() => {
+    setClickedBlockSelection(null);
+  }, [_selectionMode, previewMarkdownText]);
+
+  useEffect(() => {
+    if (selectedLine !== null && selectedEndLine !== null) {
+      // External selection sync has priority; drop stale local clicked range.
+      setClickedBlockSelection(null);
+    }
+  }, [selectedLine, selectedEndLine]);
+
+  const effectiveBlockSelection =
+    selectedLine !== null && selectedEndLine !== null
+      ? { startLine: selectedLine, endLine: selectedEndLine }
+      : clickedBlockSelection;
+
+  function updateActiveLineFromViewportTop() {
+    const container = containerRef.current;
+    if (!container) {
+      return null;
+    }
+
+    const rect = container.getBoundingClientRect();
+    const probeY = rect.top + 18;
+    const probeX = rect.left + Math.min(Math.max(rect.width * 0.18, 24), 96);
+    const probeTarget = document.elementFromPoint(probeX, probeY) as HTMLElement | null;
+    const pointerLine = resolveSourceLineFromPointer(container, probeTarget, probeY);
+    if (pointerLine) {
+      onActiveLineChange?.(pointerLine);
+      return pointerLine;
+    }
+
+    const containerTop = container.getBoundingClientRect().top;
+    const blockElements = Array.from(container.querySelectorAll<HTMLElement>('[data-block-number]'));
+    const headingElements = Array.from(container.querySelectorAll<HTMLElement>('[data-md-line]')).filter(
+      (element) => !element.classList.contains('preview-collapsed-hidden'),
+    );
+
+    let activeHeadingLine: number | null = null;
+    for (const headingElement of headingElements) {
+      const headingTop = headingElement.getBoundingClientRect().top;
+      if (headingTop <= containerTop + 12) {
+        const line = Number(headingElement.dataset.mdLine || 0);
+        if (line) {
+          activeHeadingLine = line;
+        }
+        continue;
+      }
+      break;
+    }
+
+    if (activeHeadingLine) {
+      onActiveLineChange?.(activeHeadingLine);
+      return activeHeadingLine;
+    }
+
+    if (!blockElements.length) {
+      onActiveLineChange?.(null);
+      return null;
+    }
+
+    let candidate = blockElements[0];
+    for (const blockElement of blockElements) {
+      const blockTop = blockElement.getBoundingClientRect().top;
+      if (blockTop <= containerTop + 12) {
+        candidate = blockElement;
+        continue;
+      }
+      break;
+    }
+
+    const startLine = Number(candidate.dataset.startLine || 0);
+    onActiveLineChange?.(startLine || null);
+    return startLine || null;
+  }
+
+  function getSelectionDebugInfo(line: number, endLine?: number, renderText?: string) {
+    const startLine = Math.max(1, line);
+    const lastLine = Math.max(startLine, endLine ?? startLine);
+    const normalizedText = (renderText ?? '').replace(/\r/g, ' ').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    const startBlock = findBlockForLine(blocks, startLine);
+    const endBlock = findBlockForLine(blocks, lastLine);
+    const blockRange =
+      startBlock && endBlock
+        ? { startLine: startBlock.startLine, endLine: endBlock.endLine, blockStart: startBlock.blockNumber, blockEnd: endBlock.blockNumber }
+        : null;
+    return {
+      sourceText: normalizedText,
+      blockRange,
+    };
+  }
+
+  function emitSelection(
+    selection: { line: number; endLine?: number; activeLine?: number; label: string },
+    reason: string,
+    renderText?: string,
+  ) {
+    onSelectLine?.(selection);
+    const debug = getSelectionDebugInfo(selection.line, selection.endLine, renderText);
+    console.log('[PreviewPane] selected-range', {
+      reason,
+      mode: _selectionMode,
+      line: selection.line,
+      endLine: selection.endLine ?? selection.line,
+      activeLine: selection.activeLine ?? selection.line,
+      label: selection.label,
+      renderText: debug.sourceText,
+      blockRange: debug.blockRange,
+    });
+  }
 
   function normalizeClipboardText(text: string) {
     return stripNumberCopyEnabled ? stripLineBulletsForCopy(text) : text;
@@ -776,6 +1103,9 @@ export function PreviewPane({
   }
 
   useLayoutEffect(() => {
+    if (isLightweightMode) {
+      return;
+    }
     const root = containerRef.current;
     if (!root) {
       return;
@@ -821,15 +1151,16 @@ export function PreviewPane({
         cursor += 1;
       }
     });
-  });
+  }, [isLightweightMode, _collapsedHeadingLines]);
 
   useLayoutEffect(() => {
+    if (isLightweightMode) {
+      return;
+    }
     const root = containerRef.current;
     if (!root) {
       return;
     }
-
-    let frame = 0;
     clearSearchMarks(root);
 
     if (!searchSelection?.query.trim()) {
@@ -848,19 +1179,8 @@ export function PreviewPane({
     }
 
     const query = searchSelection.query;
-    const targetMark = highlightNthOccurrenceInElement(blockContent, query, targetOccurrence);
-    if (targetMark) {
-      frame = requestAnimationFrame(() => {
-        targetMark.scrollIntoView({ block: 'center', behavior: 'auto' });
-      });
-    }
-
-    return () => {
-      if (frame) {
-        cancelAnimationFrame(frame);
-      }
-    };
-  }, [blocks, scrollRequest?.token, searchSelection]);
+    highlightNthOccurrenceInElement(blockContent, query, targetOccurrence);
+  }, [blocks, scrollRequest?.token, searchSelection, isLightweightMode]);
 
   useEffect(() => {
     onBlockCountChange?.(blocks.length);
@@ -907,64 +1227,83 @@ export function PreviewPane({
   }, [blocks, normalizedScrollLine, scrollRequest, searchSelection]);
 
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container || syncScrollRatio === null || Number.isNaN(syncScrollRatio)) {
+      return;
+    }
+    const max = container.scrollHeight - container.clientHeight;
+    const clamped = Math.max(0, Math.min(1, syncScrollRatio));
+    const currentRatio = max > 0 ? container.scrollTop / max : 0;
+    if (Math.abs(currentRatio - clamped) < 0.008) {
+      return;
+    }
+    suppressScrollEmitRef.current = true;
+    container.scrollTop = max > 0 ? max * clamped : 0;
+    const timer = window.setTimeout(() => {
+      suppressScrollEmitRef.current = false;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [syncScrollRatio]);
+
+  useEffect(() => {
+    if (isLightweightMode) {
+      return;
+    }
     const root = containerRef.current;
     if (!root) {
       return;
     }
-    const container: HTMLDivElement = root;
 
-    function syncActivePreviewLine() {
-      const containerTop = container.getBoundingClientRect().top;
-      const blockElements = Array.from(container.querySelectorAll<HTMLElement>('[data-block-number]'));
-      const headingElements = Array.from(container.querySelectorAll<HTMLElement>('[data-md-line]')).filter(
-        (element) => !element.classList.contains('preview-collapsed-hidden'),
-      );
-
-      let activeHeadingLine: number | null = null;
-      for (const headingElement of headingElements) {
-        const headingTop = headingElement.getBoundingClientRect().top;
-        if (headingTop <= containerTop + 12) {
-          const line = Number(headingElement.dataset.mdLine || 0);
-          if (line) {
-            activeHeadingLine = line;
-          }
-          continue;
-        }
-        break;
-      }
-
-      if (activeHeadingLine) {
-        onActiveLineChange?.(activeHeadingLine);
-        return;
-      }
-
-      if (!blockElements.length) {
-        onActiveLineChange?.(null);
-        return;
-      }
-
-      let candidate = blockElements[0];
-      for (const blockElement of blockElements) {
-        const blockTop = blockElement.getBoundingClientRect().top;
-        if (blockTop <= containerTop + 12) {
-          candidate = blockElement;
-          continue;
-        }
-        break;
-      }
-
-      const startLine = Number(candidate.dataset.startLine || 0);
-      onActiveLineChange?.(startLine || null);
+    if (!suppressActiveLineSync || !activeLine || searchSelection?.query.trim()) {
+      return;
     }
 
-    syncActivePreviewLine();
-    container.addEventListener('scroll', syncActivePreviewLine, { passive: true });
-    window.addEventListener('resize', syncActivePreviewLine);
-    return () => {
-      container.removeEventListener('scroll', syncActivePreviewLine);
-      window.removeEventListener('resize', syncActivePreviewLine);
+    const headingTarget = root.querySelector<HTMLElement>(`[data-md-line="${activeLine}"]`);
+    if (headingTarget) {
+      headingTarget.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+      return;
+    }
+
+    const targetBlock = findBlockForLine(blocks, activeLine);
+    if (!targetBlock) {
+      return;
+    }
+
+    const blockElement = root.querySelector<HTMLElement>(`[data-block-number="${targetBlock.blockNumber}"]`);
+    blockElement?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+  }, [activeLine, blocks, searchSelection, suppressActiveLineSync, isLightweightMode]);
+
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) {
+      return;
+    }
+    if (searchSelection?.query.trim()) {
+      return;
+    }
+    const container: HTMLDivElement = root;
+
+    if (suppressActiveLineSync) {
+      return;
+    }
+    updateActiveLineFromViewportTop();
+    const handleLocationScroll = () => {
+      const line = updateActiveLineFromViewportTop();
+      console.log('[preview_scroll_location]', {
+        line,
+        scrollTop: container.scrollTop,
+      });
     };
-  }, [blocks, onActiveLineChange]);
+    const handleLocationResize = () => {
+      updateActiveLineFromViewportTop();
+    };
+    container.addEventListener('scroll', handleLocationScroll, { passive: true });
+    window.addEventListener('resize', handleLocationResize);
+    return () => {
+      container.removeEventListener('scroll', handleLocationScroll);
+      window.removeEventListener('resize', handleLocationResize);
+    };
+  }, [blocks, onActiveLineChange, searchSelection, suppressActiveLineSync]);
 
   useEffect(() => {
     const root = containerRef.current;
@@ -1021,6 +1360,46 @@ export function PreviewPane({
   }, []);
 
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    const handleScroll = () => {
+      if (suppressScrollEmitRef.current) {
+        return;
+      }
+      const max = container.scrollHeight - container.clientHeight;
+      const ratio = max > 0 ? container.scrollTop / max : 0;
+      const clamped = Math.max(0, Math.min(1, ratio));
+      if (Math.abs(clamped - lastEmittedScrollRatioRef.current) < 0.008) {
+        return;
+      }
+      pendingScrollRatioRef.current = clamped;
+      if (scrollEmitRafRef.current !== null) {
+        return;
+      }
+      scrollEmitRafRef.current = window.requestAnimationFrame(() => {
+        scrollEmitRafRef.current = null;
+        const next = pendingScrollRatioRef.current;
+        if (next === null) {
+          return;
+        }
+        pendingScrollRatioRef.current = null;
+        lastEmittedScrollRatioRef.current = next;
+        onScrollRatioChange?.(next);
+      });
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      if (scrollEmitRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollEmitRafRef.current);
+        scrollEmitRafRef.current = null;
+      }
+    };
+  }, [onScrollRatioChange]);
+
+  useEffect(() => {
     function closeContextMenu() {
       setContextMenu(null);
     }
@@ -1035,33 +1414,139 @@ export function PreviewPane({
     };
   }, []);
 
+  const selectionModeClass =
+    _selectionMode === 'block'
+      ? 'preview-pane-block-mode'
+      : _selectionMode === 'line'
+        ? 'preview-pane-line-mode'
+        : 'preview-pane-text-mode';
+
   return (
     <div
       ref={containerRef}
-      className={`preview-pane ${autoWrap ? '' : 'preview-pane-nowrap'} preview-pane-text-mode`.trim()}
+      className={`preview-pane ${autoWrap ? '' : 'preview-pane-nowrap'} ${selectionModeClass}`.trim()}
+      onMouseDown={(event) => {
+        onMouseFocus?.();
+        if (_selectionMode !== 'line') {
+          return;
+        }
+        lineSelectionAnchorLineRef.current = resolveSourceLineFromPointer(
+          containerRef.current,
+          event.target as HTMLElement | null,
+          event.clientY,
+        );
+      }}
+      onWheel={() => {
+        onMouseFocus?.();
+        updateActiveLineFromViewportTop();
+      }}
+      onMouseEnter={() => {
+        updateActiveLineFromViewportTop();
+      }}
       onClick={(event) => {
         const target = event.target as HTMLElement | null;
         const heading = target?.closest<HTMLElement>('.preview-collapsed-heading');
-        if (!heading) {
-          return;
+        if (heading) {
+          const lineNumber = Number(heading.dataset.mdLine || 0);
+          if (lineNumber <= 0) {
+            return;
+          }
+          onToggleCollapsedHeading?.(lineNumber);
+          lineSelectionAnchorLineRef.current = null;
         }
-        const lineNumber = Number(heading.dataset.mdLine || 0);
-        if (!lineNumber) {
-          return;
-        }
-        onToggleCollapsedHeading?.(lineNumber);
       }}
       onContextMenu={(event) => {
         event.preventDefault();
         setContextMenu({ x: event.clientX, y: event.clientY });
       }}
-      onMouseUp={() => {
-        expandSelectionToBlockBoundaries();
-        extendSelectionStartToLineBoundary();
-        extendSelectionEndToLineBoundary();
+      onMouseUp={(event) => {
+        const commitLocationAtClickEnd = () => {
+          updateActiveLineFromViewportTop();
+        };
+        const anchorLine = lineSelectionAnchorLineRef.current;
+        lineSelectionAnchorLineRef.current = null;
+        const selection = window.getSelection();
+        if (_selectionMode === 'line' && selection) {
+          expandSelectionToStructuralElements(selection);
+        }
+        if (_selectionMode === 'block' && selection) {
+          expandSelectionToBlockBoundaries();
+          const nextSelection = window.getSelection();
+          if (!nextSelection || !nextSelection.rangeCount || nextSelection.isCollapsed) {
+            commitLocationAtClickEnd();
+            return;
+          }
+          const range = nextSelection.getRangeAt(0);
+          const startElement =
+            range.startContainer instanceof HTMLElement
+              ? range.startContainer
+              : range.startContainer.parentElement;
+          const endElement =
+            range.endContainer instanceof HTMLElement
+              ? range.endContainer
+              : range.endContainer.parentElement;
+          const startBlock = startElement?.closest<HTMLElement>('[data-block-number]') ?? null;
+          const endBlock = endElement?.closest<HTMLElement>('[data-block-number]') ?? null;
+          if (!startBlock || !endBlock) {
+            commitLocationAtClickEnd();
+            return;
+          }
+          const startNumber = Number(startBlock.dataset.blockNumber || 0);
+          const endNumber = Number(endBlock.dataset.blockNumber || 0);
+          if (!startNumber || !endNumber) {
+            commitLocationAtClickEnd();
+            return;
+          }
+          const firstNumber = Math.min(startNumber, endNumber);
+          const lastNumber = Math.max(startNumber, endNumber);
+          const firstBlock = blocks.find((item) => item.blockNumber === firstNumber) ?? null;
+          const lastBlock = blocks.find((item) => item.blockNumber === lastNumber) ?? null;
+          if (!firstBlock || !lastBlock) {
+            commitLocationAtClickEnd();
+            return;
+          }
+          emitSelection({
+            line: firstBlock.startLine,
+            endLine: lastBlock.endLine,
+            activeLine: firstBlock.startLine,
+            label: `${firstBlock.startLine}${lastBlock.endLine !== firstBlock.startLine ? `-${lastBlock.endLine}` : ''}행 선택`,
+          }, 'block-boundary', nextSelection.toString().trim());
+          commitLocationAtClickEnd();
+          return;
+        }
+        const selectedText = selection?.toString().trim() ?? '';
 
-        const selectedText = window.getSelection()?.toString().trim() ?? '';
+        if (_selectionMode === 'line') {
+          if (!selectedText) {
+            commitLocationAtClickEnd();
+            return;
+          }
+          const pointerLine = resolveSourceLineFromPointer(
+            containerRef.current,
+            event.target as HTMLElement | null,
+            event.clientY,
+          );
+
+          const pointerStart = anchorLine ?? pointerLine;
+          const pointerEnd = pointerLine ?? anchorLine;
+          if (pointerStart && pointerEnd) {
+            const startLine = Math.min(pointerStart, pointerEnd);
+            const endLine = Math.max(pointerStart, pointerEnd);
+            emitSelection({
+              line: startLine,
+              endLine,
+              activeLine: startLine,
+              label: `${startLine}${endLine !== startLine ? `-${endLine}` : ''}행 선택`,
+            }, 'line-pointer', selectedText);
+            commitLocationAtClickEnd();
+            return;
+          }
+          commitLocationAtClickEnd();
+          return;
+        }
+
         if (!selectedText) {
+          commitLocationAtClickEnd();
           return;
         }
 
@@ -1073,42 +1558,51 @@ export function PreviewPane({
           mode: _selectionMode,
           text: selectedText,
         });
+        commitLocationAtClickEnd();
       }}
     >
       {blocks.length ? (
         blocks.map((block) => (
           <div
             key={`${block.startLine}-${block.endLine}-${block.blockNumber}`}
-            className={`preview-html-block ${
-              selectedLine !== null &&
-              selectedEndLine !== null &&
-              block.startLine === selectedLine &&
-              block.endLine === selectedEndLine
-                ? 'is-selected'
-                : ''
-            } ${
-              searchSelection &&
-              searchSelection.lineNumber >= block.startLine &&
-              searchSelection.lineNumber <= block.endLine
-                ? 'is-search-target'
-                : ''
-            } ${
-              activeLine !== null &&
-              activeLine >= block.startLine &&
-              activeLine <= block.endLine
-                ? 'is-active-line'
-                : ''
-            }`.trim()}
+            className="preview-html-block"
             data-block-number={block.blockNumber}
             data-start-line={block.startLine}
             data-end-line={block.endLine}
+            onClick={(event) => {
+              if (_selectionMode !== 'block') {
+                return;
+              }
+              const target = event.target as HTMLElement | null;
+              if (target?.closest('.preview-collapsed-heading')) {
+                return;
+              }
+
+              const blockElement = event.currentTarget as HTMLElement;
+              const startBoundary = findTextBoundaryInElement(blockElement, 'start');
+              const endBoundary = findTextBoundaryInElement(blockElement, 'end');
+              if (!startBoundary || !endBoundary) {
+                return;
+              }
+
+              const selection = window.getSelection();
+              if (!selection) {
+                return;
+              }
+              const range = document.createRange();
+              range.setStart(startBoundary.node, startBoundary.offset);
+              range.setEnd(endBoundary.node, endBoundary.offset);
+              selection.removeAllRanges();
+              selection.addRange(range);
+
+              emitSelection({
+                line: block.startLine,
+                endLine: block.endLine,
+                activeLine: block.startLine,
+                label: `${block.startLine}${block.endLine !== block.startLine ? `-${block.endLine}` : ''}행 선택`,
+              }, 'block-click', selection.toString().trim());
+            }}
           >
-            <div className="preview-html-meta">
-              <span className="preview-html-lines">
-                {block.startLine}
-                {block.endLine !== block.startLine ? `-${block.endLine}` : ''}행
-              </span>
-            </div>
             <div className="preview-html-content" dangerouslySetInnerHTML={{ __html: block.html }} />
           </div>
         ))

@@ -429,9 +429,14 @@ function ensureDatabase() {
       edited_text TEXT NOT NULL,
       original_window TEXT NOT NULL,
       edited_window TEXT NOT NULL,
+      left_context TEXT NOT NULL DEFAULT '',
+      before_focus TEXT NOT NULL DEFAULT '',
+      after_focus TEXT NOT NULL DEFAULT '',
+      right_context TEXT NOT NULL DEFAULT '',
       diff_summary TEXT NOT NULL,
       quality_score REAL NOT NULL DEFAULT 0,
       review_status TEXT NOT NULL DEFAULT 'pending',
+      final_action TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -459,6 +464,21 @@ function ensureDatabase() {
 
   try {
     db.exec(`ALTER TABLE hierarchy_labels ADD COLUMN final_label TEXT NOT NULL DEFAULT ''`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE sentence_edits ADD COLUMN left_context TEXT NOT NULL DEFAULT ''`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE sentence_edits ADD COLUMN before_focus TEXT NOT NULL DEFAULT ''`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE sentence_edits ADD COLUMN after_focus TEXT NOT NULL DEFAULT ''`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE sentence_edits ADD COLUMN right_context TEXT NOT NULL DEFAULT ''`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE sentence_edits ADD COLUMN final_action TEXT NOT NULL DEFAULT ''`);
   } catch {}
 }
 
@@ -695,6 +715,83 @@ function buildEditPatchConsoleRecord(filePath, fileName, patch) {
   };
 }
 
+function buildSentenceReviewItem(filePath, fileName, patch, createdAt = toIsoNow()) {
+  const patchId = buildEditPatchDatasetId(filePath, patch);
+  const qualityScore = scoreEditPatchQuality(patch);
+  const contentKind = inferSentenceEditKind(patch);
+  const focusWindow = extractFocusedWordWindow(patch.originalWindow, patch.editedWindow, 4);
+  const focusedOriginalText = focusWindow.originalFocus || String(patch.originalText || '').trim();
+  const focusedEditedText = focusWindow.editedFocus || String(patch.editedText || '').trim();
+  return {
+    id: patchId,
+    type: 'sentence_edit',
+    sourcePdfName: fileName,
+    sourcePdfPath: filePath,
+    markdownPath: filePath,
+    reviewDir: path.dirname(filePath),
+    previewImagePath: '',
+    candidateCount: 1,
+    memberPaths: [],
+    createdAt,
+    status: qualityScore >= 0.7 ? 'pending' : 'archived',
+    editType: patch.changeType,
+    contentKind,
+    action: mapEditPatchToAction(patch.changeType),
+    qualityScore,
+    lineStart: patch.lineStart,
+    lineEnd: patch.lineEnd,
+    leftContext: focusWindow.leftContext,
+    beforeFocus: focusWindow.originalFocus,
+    afterFocus: focusWindow.editedFocus,
+    rightContext: focusWindow.rightContext,
+    originalText: focusedOriginalText,
+    editedText: focusedEditedText,
+    originalWindow: patch.originalWindow,
+    editedWindow: patch.editedWindow,
+    diffSummary: `- ${focusedOriginalText}\n+ ${focusedEditedText}`,
+    finalAction: '',
+  };
+}
+
+function shouldKeepSentenceReviewItem(item) {
+  const originalText = String(item?.originalText || '').trim();
+  const editedText = String(item?.editedText || '').trim();
+  if (!originalText && !editedText) {
+    return false;
+  }
+  if (originalText === editedText) {
+    return false;
+  }
+  return true;
+}
+
+function logSentenceReviewResult(filePath, fileName, reviewItems) {
+  console.log('[ml_sentence_dataset]', JSON.stringify({
+    filePath,
+    fileName,
+    patchCount: reviewItems.length,
+    patches: reviewItems.map((item) => ({
+      patch_id: item.id,
+      file_name: fileName,
+      file_path: filePath,
+      content_kind: item.contentKind,
+      edit_type: item.editType,
+      ml_action: item.action,
+      quality_score: item.qualityScore,
+      line_start: item.lineStart,
+      line_end: item.lineEnd,
+      left_context: item.leftContext,
+      before_focus: item.beforeFocus,
+      after_focus: item.afterFocus,
+      right_context: item.rightContext,
+      original_window: item.originalWindow,
+      edited_window: item.editedWindow,
+      diff_summary: item.diffSummary,
+      review_status: item.status,
+    })),
+  }, null, 2));
+}
+
 async function persistEditPatchesDataset(filePath, fileName, editPatches) {
   if (!Array.isArray(editPatches) || !editPatches.length) {
     return { rowCount: 0 };
@@ -791,18 +888,18 @@ async function persistEditPatchesDataset(filePath, fileName, editPatches) {
   return { rowCount: editPatches.length };
 }
 
-function persistSentenceEdits(filePath, fileName, editPatches) {
-  if (!Array.isArray(editPatches) || !editPatches.length) {
+function persistSentenceEdits(reviewItems) {
+  if (!Array.isArray(reviewItems) || !reviewItems.length) {
     return 0;
   }
 
-  const createdAt = toIsoNow();
   const upsertSentenceEdit = db.prepare(`
     INSERT INTO sentence_edits (
       id, document_path, file_name, content_kind, action, change_type,
       line_start, line_end, original_text, edited_text, original_window, edited_window,
-      diff_summary, quality_score, review_status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      left_context, before_focus, after_focus, right_context,
+      diff_summary, quality_score, review_status, final_action, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       content_kind = excluded.content_kind,
       action = excluded.action,
@@ -813,37 +910,45 @@ function persistSentenceEdits(filePath, fileName, editPatches) {
       edited_text = excluded.edited_text,
       original_window = excluded.original_window,
       edited_window = excluded.edited_window,
+      left_context = excluded.left_context,
+      before_focus = excluded.before_focus,
+      after_focus = excluded.after_focus,
+      right_context = excluded.right_context,
       diff_summary = excluded.diff_summary,
       quality_score = excluded.quality_score,
       review_status = excluded.review_status,
+      final_action = excluded.final_action,
       updated_at = excluded.updated_at
   `);
 
-  editPatches.forEach((patch) => {
-    const patchId = buildEditPatchDatasetId(filePath, patch);
-    const qualityScore = scoreEditPatchQuality(patch);
+  reviewItems.forEach((item) => {
     upsertSentenceEdit.run(
-      patchId,
-      filePath,
-      fileName,
-      inferSentenceEditKind(patch),
-      mapEditPatchToAction(patch.changeType),
-      patch.changeType,
-      patch.lineStart,
-      patch.lineEnd,
-      patch.originalText,
-      patch.editedText,
-      patch.originalWindow,
-      patch.editedWindow,
-      patch.diffSummary,
-      qualityScore,
-      qualityScore >= 0.7 ? 'pending' : 'archived',
-      createdAt,
-      createdAt,
+      item.id,
+      item.sourcePdfPath || '',
+      item.sourcePdfName || '',
+      item.contentKind || 'sentence',
+      item.action || 'modify',
+      item.editType || 'typo',
+      Number(item.lineStart || 0),
+      Number(item.lineEnd || 0),
+      item.originalText || '',
+      item.editedText || '',
+      item.originalWindow || '',
+      item.editedWindow || '',
+      item.leftContext || '',
+      item.beforeFocus || '',
+      item.afterFocus || '',
+      item.rightContext || '',
+      item.diffSummary || '',
+      Number(item.qualityScore || 0),
+      item.status || 'pending',
+      item.finalAction || '',
+      item.createdAt || toIsoNow(),
+      toIsoNow(),
     );
   });
 
-  return editPatches.length;
+  return reviewItems.length;
 }
 
 function upsertLogoReviewRecords(reviewItems) {
@@ -908,6 +1013,258 @@ function updateLogoReviewRecord(payload, action) {
     toIsoNow(),
     payload?.id ?? '',
   );
+}
+
+function mapSentenceEditRow(row) {
+  return {
+    id: row.id,
+    type: 'sentence_edit',
+    sourcePdfName: row.file_name,
+    sourcePdfPath: row.document_path,
+    markdownPath: row.document_path,
+    reviewDir: path.dirname(row.document_path),
+    previewImagePath: '',
+    candidateCount: 1,
+    memberPaths: [],
+    createdAt: row.created_at,
+    status: row.review_status,
+    editType: row.change_type,
+    contentKind: row.content_kind,
+    action: row.action,
+    qualityScore: row.quality_score,
+    lineStart: row.line_start,
+    lineEnd: row.line_end,
+    leftContext: row.left_context ?? '',
+    beforeFocus: row.before_focus ?? '',
+    afterFocus: row.after_focus ?? '',
+    rightContext: row.right_context ?? '',
+    originalText: row.original_text,
+    editedText: row.edited_text,
+    originalWindow: row.original_window,
+    editedWindow: row.edited_window,
+    diffSummary: row.diff_summary,
+    finalAction: row.final_action ?? '',
+  };
+}
+
+function normalizeSentenceReviewValue(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function shouldDisplaySentenceReviewItem(item) {
+  const originalText = normalizeSentenceReviewValue(item?.originalText);
+  const editedText = normalizeSentenceReviewValue(item?.editedText);
+  const originalFocus = normalizeSentenceReviewValue(item?.beforeFocus);
+  const editedFocus = normalizeSentenceReviewValue(item?.afterFocus);
+
+  if (!originalText && !editedText) {
+    return false;
+  }
+  if (originalText === editedText) {
+    return false;
+  }
+  if (originalFocus && editedFocus && originalFocus === editedFocus) {
+    return false;
+  }
+  return true;
+}
+
+function buildHierarchyReviewItemFromSentence(item) {
+  const editedWindow = String(item?.editedWindow || '').trim();
+  const originalWindow = String(item?.originalWindow || '').trim();
+  const editedFocus = String(item?.afterFocus || '').trim();
+  const originalFocus = String(item?.beforeFocus || '').trim();
+  const headingSource = [editedWindow, originalWindow, editedFocus, originalFocus]
+    .find((value) => /^(#{1,4})\s*(.+)$/.test(String(value || '').trim())) || '';
+  const headingMatch = String(headingSource).match(/^(#{1,4})\s*(.+)$/);
+  if (headingMatch) {
+    return {
+      id: `${item.id}:hierarchy`,
+      type: 'hierarchy_pattern',
+      sourcePdfName: item.sourcePdfName,
+      sourcePdfPath: item.sourcePdfPath,
+      markdownPath: item.markdownPath,
+      reviewDir: item.reviewDir,
+      previewImagePath: '',
+      candidateCount: 1,
+      memberPaths: [],
+      createdAt: item.createdAt,
+      status: 'pending',
+      patternKind: 'fixed_section',
+      candidateText: '저장 중 제목 수정 패턴',
+      recommendationLabel: `heading_${headingMatch[1].length}`,
+      sampleTexts: [headingMatch[2].trim() || normalizeHierarchyLine(originalWindow) || normalizeHierarchyLine(editedWindow)],
+      sampleLines: [item.lineStart],
+    };
+  }
+
+  const bracketSource = [editedWindow, originalWindow, editedFocus, originalFocus]
+    .find((value) => /^\[[^\[\]]{2,30}\]$/.test(String(value || '').trim())) || '';
+  const bracketMatch = String(bracketSource).match(/^\[[^\[\]]{2,30}\]$/);
+  if (bracketMatch) {
+    return {
+      id: `${item.id}:hierarchy`,
+      type: 'hierarchy_pattern',
+      sourcePdfName: item.sourcePdfName,
+      sourcePdfPath: item.sourcePdfPath,
+      markdownPath: item.markdownPath,
+      reviewDir: item.reviewDir,
+      previewImagePath: '',
+      candidateCount: 1,
+      memberPaths: [],
+      createdAt: item.createdAt,
+      status: 'pending',
+      patternKind: 'fixed_section',
+      candidateText: '저장 중 대괄호 섹션 수정 패턴',
+      recommendationLabel: 'heading_2',
+      sampleTexts: [bracketSource],
+      sampleLines: [item.lineStart],
+    };
+  }
+
+  return null;
+}
+
+function partitionSentenceAndHierarchyReviewItems(reviewItems) {
+  const sentenceItems = [];
+  const hierarchyItems = [];
+
+  reviewItems.forEach((item) => {
+    const hierarchyItem = buildHierarchyReviewItemFromSentence(item);
+    if (hierarchyItem) {
+      hierarchyItems.push(hierarchyItem);
+      return;
+    }
+    sentenceItems.push(item);
+  });
+
+  return { sentenceItems, hierarchyItems };
+}
+
+function upsertHierarchyCandidateItems(items) {
+  if (!Array.isArray(items) || !items.length) {
+    return [];
+  }
+
+  const now = toIsoNow();
+  const upsertCandidate = db.prepare(`
+    INSERT INTO hierarchy_candidates (
+      id, markdown_path, pattern_kind, candidate_text, recommendation_label,
+      sample_lines_json, sample_texts_json, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      markdown_path = excluded.markdown_path,
+      pattern_kind = excluded.pattern_kind,
+      candidate_text = excluded.candidate_text,
+      recommendation_label = excluded.recommendation_label,
+      sample_lines_json = excluded.sample_lines_json,
+      sample_texts_json = excluded.sample_texts_json,
+      status = 'pending',
+      updated_at = excluded.updated_at
+  `);
+
+  return items.map((item, index) => {
+    const normalized = {
+      ...item,
+      id: item.id || `${path.basename(item.markdownPath || '')}:hierarchy:${index + 1}`,
+      type: 'hierarchy_pattern',
+      createdAt: item.createdAt || now,
+      status: 'pending',
+      sampleTexts: Array.isArray(item.sampleTexts) ? item.sampleTexts : [],
+      sampleLines: Array.isArray(item.sampleLines) ? item.sampleLines : [],
+    };
+    upsertCandidate.run(
+      normalized.id,
+      normalized.markdownPath,
+      normalized.patternKind,
+      normalized.candidateText,
+      normalized.recommendationLabel,
+      JSON.stringify(normalized.sampleLines),
+      JSON.stringify(normalized.sampleTexts),
+      now,
+      now,
+    );
+    return normalized;
+  });
+}
+
+function getSentenceReviewItems() {
+  const rows = db.prepare(`
+    SELECT id, document_path, file_name, content_kind, action, change_type,
+      line_start, line_end, original_text, edited_text, original_window, edited_window,
+      left_context, before_focus, after_focus, right_context,
+      diff_summary, quality_score, review_status, final_action, created_at, updated_at
+    FROM sentence_edits
+    WHERE review_status IN ('pending', 'approved', 'rejected')
+    ORDER BY updated_at DESC, created_at DESC
+    LIMIT 300
+  `).all();
+
+  return rows
+    .map(mapSentenceEditRow)
+    .filter(shouldDisplaySentenceReviewItem);
+}
+
+async function analyzeSentenceEditsWithPython(filePath, fileName, previousContent, nextContent) {
+  if (String(previousContent || '') === String(nextContent || '')) {
+    return [];
+  }
+
+  const tempDir = path.join(app.getPath('userData'), 'temp');
+  await fs.mkdir(tempDir, { recursive: true });
+  const payloadPath = path.join(tempDir, `sentence_edits_${Date.now()}.json`);
+  const createdAt = toIsoNow();
+  const payload = {
+    file_path: filePath,
+    file_name: fileName,
+    created_at: createdAt,
+    before_content: String(previousContent || ''),
+    after_content: String(nextContent || ''),
+  };
+  const analyzeScriptPath = path.resolve(__dirname, '..', '..', 'scripts', 'analyze_sentence_edits.py');
+
+  try {
+    await fs.writeFile(payloadPath, JSON.stringify(payload), 'utf8');
+    const { stdout } = await runPythonScript([analyzeScriptPath, '--input', payloadPath], {
+      cwd: path.resolve(__dirname, '..', '..'),
+      windowsHide: true,
+    });
+    const parsed = JSON.parse(stdout || '{}');
+    if (!Array.isArray(parsed?.items)) {
+      throw new Error('Sentence edit analyzer returned invalid items');
+    }
+    if (Array.isArray(parsed.logs)) {
+      parsed.logs.forEach((entry) => console.log(`[sentence-analyzer] ${entry}`));
+    }
+    if (Array.isArray(parsed.errors) && parsed.errors.length) {
+      parsed.errors.forEach((entry) => console.error(`[sentence-analyzer] ${entry}`));
+    }
+    return parsed.items.filter(shouldKeepSentenceReviewItem);
+  } finally {
+    await fs.unlink(payloadPath).catch(() => null);
+  }
+}
+
+function resolveSentenceReviewItem(payload) {
+  const action = payload?.action === 'approve' ? 'approve' : payload?.action === 'reject' ? 'reject' : null;
+  if (!action || !payload?.id) {
+    return { ok: false };
+  }
+
+  db.prepare(`
+    UPDATE sentence_edits
+    SET review_status = ?, final_action = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    action === 'approve' ? 'approved' : 'rejected',
+    action,
+    toIsoNow(),
+    payload.id,
+  );
+
+  return { ok: true };
 }
 
 async function openMlDatasetRoot() {
@@ -1230,17 +1587,32 @@ async function saveDocument({ filePath, fileName, content }) {
       );
     });
 
+    let sentenceReviewItems = [];
+    try {
+      sentenceReviewItems = await analyzeSentenceEditsWithPython(targetPath, doc.fileName, previousContent, content);
+    } catch (error) {
+      console.error('[sentence-analyzer] fallback to JS', error instanceof Error ? error.message : String(error));
+      sentenceReviewItems = editPatches.map((patch) => buildSentenceReviewItem(targetPath, doc.fileName, patch));
+    }
+
+    const { sentenceItems, hierarchyItems } = partitionSentenceAndHierarchyReviewItems(sentenceReviewItems);
+    persistSentenceEdits(sentenceItems);
+    const persistedHierarchyItems = upsertHierarchyCandidateItems(hierarchyItems);
     await persistEditPatchesDataset(targetPath, doc.fileName, editPatches);
-    console.log('[ml_sentence_dataset]', JSON.stringify({
-      filePath: targetPath,
-      fileName: doc.fileName,
-      patchCount: editPatches.length,
-      patches: editPatches.map((patch) => buildEditPatchConsoleRecord(targetPath, doc.fileName, patch)),
-    }, null, 2));
+    logSentenceReviewResult(targetPath, doc.fileName, sentenceItems);
+    return {
+      doc,
+      editPatchCount: editPatches.length,
+      reviewItems: [
+        ...persistedHierarchyItems.filter((item) => item.status !== 'archived'),
+        ...sentenceItems.filter((item) => item.status !== 'archived'),
+      ],
+    };
   }
   return {
     doc,
     editPatchCount: editPatches.length,
+    reviewItems: [],
   };
 }
 
@@ -2154,6 +2526,10 @@ ipcMain.handle('review:scan-logo-items', async (_event, folderPath, inferenceEng
   return scanLogoReviewItems(folderPath, inferenceEngine);
 });
 
+ipcMain.handle('review:get-sentence-items', () => {
+  return getSentenceReviewItems();
+});
+
 ipcMain.handle('document:analyze-hierarchy-patterns', async (_event, markdownPath) => {
   return analyzeHierarchyPatterns(markdownPath);
 });
@@ -2250,6 +2626,10 @@ ipcMain.handle('review:resolve-logo-item', async (_event, payload) => {
 
 ipcMain.handle('review:resolve-hierarchy-item', async (_event, payload) => {
   return resolveHierarchyReviewItem(payload);
+});
+
+ipcMain.handle('review:resolve-sentence-item', async (_event, payload) => {
+  return resolveSentenceReviewItem(payload);
 });
 
 ipcMain.handle('document:save', async (_event, payload) => saveDocument(payload));

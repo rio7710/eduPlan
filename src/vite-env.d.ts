@@ -19,6 +19,7 @@ interface SaveDocumentPayload {
 interface SaveDocumentResult {
   doc: ShellDocument | null;
   editPatchCount: number;
+  reviewItems: ReviewItem[];
 }
 
 interface FolderEntry {
@@ -91,7 +92,37 @@ interface HierarchyPatternReviewItem {
   sampleLines: number[];
 }
 
-type ReviewItem = LogoReviewItem | HierarchyPatternReviewItem;
+interface SentenceEditReviewItem {
+  id: string;
+  type: 'sentence_edit';
+  sourcePdfName: string;
+  sourcePdfPath: string;
+  markdownPath: string;
+  reviewDir: string;
+  previewImagePath: string;
+  candidateCount: number;
+  memberPaths: string[];
+  createdAt: string;
+  status: 'pending' | 'approved' | 'rejected' | 'archived';
+  editType: string;
+  contentKind: string;
+  action: string;
+  qualityScore: number;
+  lineStart: number;
+  lineEnd: number;
+  leftContext: string;
+  beforeFocus: string;
+  afterFocus: string;
+  rightContext: string;
+  originalText: string;
+  editedText: string;
+  originalWindow: string;
+  editedWindow: string;
+  diffSummary: string;
+  finalAction?: string;
+}
+
+type ReviewItem = LogoReviewItem | HierarchyPatternReviewItem | SentenceEditReviewItem;
 
 interface PdfConversionResult {
   doc: ShellDocument | null;
@@ -158,6 +189,7 @@ interface Window {
     confirmMlDatasetResetFlow: () => Promise<MlDatasetActionResult>;
     deleteDocumentPath: (filePath: string) => Promise<{ ok: boolean; filePath?: string }>;
     scanLogoReviewItems: (folderPath: string, inferenceEngine?: 'py_only' | 'py_lgbm') => Promise<LogoReviewItem[]>;
+    getSentenceReviewItems: () => Promise<SentenceEditReviewItem[]>;
     resolveHierarchyReviewItem: (payload: {
       id: string;
       markdownPath: string;
@@ -169,6 +201,10 @@ interface Window {
       sampleLines: number[];
       action: 'approve' | 'reject';
     }) => Promise<{ ok: boolean; error?: string; doc?: ShellDocument | null }>;
+    resolveSentenceReviewItem: (payload: {
+      id: string;
+      action: 'approve' | 'reject';
+    }) => Promise<{ ok: boolean; error?: string }>;
     resolveLogoReviewItem: (payload: {
       id: string;
       sourcePdfName: string;

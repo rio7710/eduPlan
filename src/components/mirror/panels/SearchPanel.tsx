@@ -14,6 +14,7 @@ type Props = {
   document: ShellDocument | null;
   folderPath: string | null;
   activeLine?: number | null;
+  searchSelection?: { filePath?: string; lineNumber: number; start: number; end: number; query: string } | null;
   mode: SearchMode;
   scope: SearchScope;
   query: string;
@@ -79,10 +80,30 @@ function renderHighlightedLine(lineText: string, start: number, end: number) {
   );
 }
 
+function isSearchSelectionMatch(
+  searchSelection: { filePath?: string; lineNumber: number; start: number; end: number; query: string } | null,
+  match: { lineNumber: number; start: number; end: number; filePath?: string },
+) {
+  if (!searchSelection?.query.trim()) {
+    return false;
+  }
+
+  if (searchSelection.filePath && match.filePath && searchSelection.filePath !== match.filePath) {
+    return false;
+  }
+
+  return (
+    searchSelection.lineNumber === match.lineNumber
+    && searchSelection.start === match.start
+    && searchSelection.end === match.end
+  );
+}
+
 export function SearchPanel({
   document,
   folderPath,
   activeLine = null,
+  searchSelection = null,
   mode,
   scope,
   query,
@@ -104,7 +125,6 @@ export function SearchPanel({
 
   const documentMatches = useMemo(() => buildMatches(document?.content ?? '', query), [document?.content, query]);
   const currentMatches = scope === 'folder' ? folderMatches : documentMatches;
-  const selectedMatch = currentMatches[selectedIndex] ?? null;
   const hasDocument = Boolean(document);
   const hasFolder = Boolean(folderPath);
 
@@ -115,20 +135,15 @@ export function SearchPanel({
   }, [hasFolder, onScopeChange, scope]);
 
   useEffect(() => {
-    onSelectedIndexChange(0);
-    setFolderStatus('');
-  }, [document?.id, folderPath, mode, onSelectedIndexChange, query, scope]);
+    if (!hasDocument && hasFolder && scope === 'document') {
+      onScopeChange('folder');
+    }
+  }, [hasDocument, hasFolder, onScopeChange, scope]);
 
   useEffect(() => {
-    if (scope !== 'document' || !documentMatches.length || !activeLine) {
-      return;
-    }
-
-    const foundIndex = documentMatches.findIndex((match) => match.lineNumber === activeLine);
-    if (foundIndex >= 0) {
-      onSelectedIndexChange(foundIndex);
-    }
-  }, [activeLine, documentMatches, onSelectedIndexChange, scope]);
+    onSelectedIndexChange(0);
+    setFolderStatus('');
+  }, [folderPath, mode, onSelectedIndexChange, query, scope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -194,6 +209,7 @@ export function SearchPanel({
       return;
     }
 
+    const selectedMatch = currentMatches[selectedIndex] ?? null;
     const target = selectedMatch as SearchMatch | null;
     if (!target) {
       return;
@@ -285,7 +301,13 @@ export function SearchPanel({
             role="switch"
             aria-label="검색 범위 전환"
             aria-checked={scope === 'folder'}
-            onClick={() => onScopeChange(scope === 'document' ? 'folder' : 'document')}
+            onClick={() => {
+              if (scope === 'folder') {
+                onScopeChange('document');
+                return;
+              }
+              onScopeChange(hasDocument ? 'document' : 'folder');
+            }}
           >
             <span className="search-scope-switch-thumb" aria-hidden="true" />
           </button>
@@ -315,7 +337,9 @@ export function SearchPanel({
                   : '폴더를 먼저 열어주세요'
                 : hasDocument
                   ? '현재 문서에서 검색...'
-                  : '문서를 먼저 열어주세요'
+                  : hasFolder
+                    ? '현재 문서가 없어 폴더 전체 검색으로 전환됩니다'
+                    : '문서를 먼저 열어주세요'
             }
             value={query}
             disabled={scope === 'folder' ? !hasFolder : !hasDocument}
@@ -394,7 +418,11 @@ export function SearchPanel({
                 <button
                   key={`${match.filePath}-${match.lineNumber}-${match.start}-${index}`}
                   type="button"
-                  className={`search-result-item ${selectedMatch === match ? 'active' : ''}`}
+                  className={`search-result-item ${
+                    isSearchSelectionMatch(searchSelection, { ...match, filePath: match.filePath })
+                      ? 'active'
+                      : ''
+                  }`}
                   onClick={() => {
                       onSelectedIndexChange(index);
                       onSelectFolderResult(match);
@@ -417,7 +445,11 @@ export function SearchPanel({
               <button
                 key={`${match.lineNumber}-${match.start}-${index}`}
                 type="button"
-                className={`search-result-item ${selectedMatch === match ? 'active' : ''}`}
+                className={`search-result-item ${
+                  isSearchSelectionMatch(searchSelection, match)
+                    ? 'active'
+                    : ''
+                }`}
                 onClick={() => {
                   onSelectedIndexChange(index);
                   onSelectResult(match);

@@ -24,7 +24,7 @@ import { getFileIcon } from '@/utils/fileIcon';
 
 export type PanelId = 'explorer' | 'md-menu' | 'search' | 'review' | 'dataset' | 'settings';
 export type ViewId = 'welcome' | 'upload' | 'editor' | 'review' | 'dataset' | 'settings';
-export type EditorMode = 'wysiwyg' | 'markdown' | 'html' | 'preview';
+export type EditorMode = 'wysiwyg' | 'markdown' | 'html' | 'preview' | 'split';
 export type PreviewSelectionMode = 'block' | 'line' | 'text';
 const TRAINING_ACCESS_PASSWORD = 'jung25)(';
 const PREVIEW_SELECTION_MODE_STORAGE_KEY = 'eduplan-preview-selection-mode';
@@ -39,17 +39,29 @@ type StoredEditorSession = {
   editorMode: EditorMode;
 };
 
+function isEditableMode(mode: EditorMode) {
+  return mode === 'markdown' || mode === 'html' || mode === 'wysiwyg' || mode === 'split';
+}
+
+function normalizeSessionLine(line: unknown) {
+  const numeric = Number(line);
+  if (!Number.isFinite(numeric)) {
+    return 1;
+  }
+  return Math.max(1, Math.floor(numeric));
+}
+
+function normalizeSessionEditorMode(mode: unknown): EditorMode {
+  if (mode === 'markdown' || mode === 'html' || mode === 'wysiwyg' || mode === 'split') {
+    return mode;
+  }
+  return 'markdown';
+}
+
 type UiTab = {
   id: string;
   label: string;
   icon: string;
-};
-
-type SearchSelection = {
-  lineNumber: number;
-  start: number;
-  end: number;
-  query: string;
 };
 
 type SearchPanelState = {
@@ -105,10 +117,10 @@ export function App() {
   const [activePanel, setActivePanel] = useState<PanelId>('explorer');
   const [activeView, setActiveView] = useState<ViewId>('welcome');
   const [activeTab, setActiveTab] = useState('welcome');
-  const [editorMode, setEditorMode] = useState<EditorMode>('markdown');
+  const [editorMode, setEditorMode] = useState<EditorMode>('preview');
   const [previewSelectionMode, setPreviewSelectionMode] = useState<PreviewSelectionMode>(() => {
     const savedMode = window.localStorage.getItem(PREVIEW_SELECTION_MODE_STORAGE_KEY);
-    return savedMode === 'block' || savedMode === 'line' || savedMode === 'text' ? savedMode : 'block';
+    return savedMode === 'block' || savedMode === 'line' || savedMode === 'text' ? savedMode : 'text';
   });
   const [autoWrap, setAutoWrap] = useState<boolean>(() => window.localStorage.getItem('eduplan-auto-wrap') !== 'off');
   const [fontSettings, setFontSettings] = useState<FontSettings>(() => readStoredFontSettings());
@@ -124,8 +136,8 @@ export function App() {
   const [currentDocument, setCurrentDocument] = useState<ShellDocument | null>(null);
   const [openDocuments, setOpenDocuments] = useState<Record<string, ShellDocument>>({});
   const [scrollRequest, setScrollRequest] = useState<{ line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number } | null>(null);
+  const [selectionRequest, setSelectionRequest] = useState<{ line: number; token: number } | null>(null);
   const [selectedPreviewLine, setSelectedPreviewLine] = useState<{ line: number; endLine?: number; activeLine?: number; label: string } | null>(null);
-  const [searchSelection, setSearchSelection] = useState<SearchSelection | null>(null);
   const [searchPanelState, setSearchPanelState] = useState<SearchPanelState>({
     mode: 'find',
     scope: 'document',
@@ -136,12 +148,15 @@ export function App() {
   const [uploadSelection, setUploadSelection] = useState<UploadSelection | null>(null);
   const [logoReviewItems, setLogoReviewItems] = useState<LogoReviewItem[]>([]);
   const [hierarchyReviewItems, setHierarchyReviewItems] = useState<HierarchyPatternReviewItem[]>([]);
+  const [sentenceReviewItems, setSentenceReviewItems] = useState<SentenceEditReviewItem[]>([]);
   const [mlDatasetStats, setMlDatasetStats] = useState<MlDatasetStats | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isTrainingAccessOpen, setIsTrainingAccessOpen] = useState(false);
   const [trainingPassword, setTrainingPassword] = useState('');
+  const [locationSurface, setLocationSurface] = useState<'Edit' | 'View' | 'Menu' | null>('View');
   const [currentEditorLine, setCurrentEditorLine] = useState<number | null>(null);
+  const [currentPreviewLine, setCurrentPreviewLine] = useState<number | null>(null);
   const [collapsedHeadingLines, setCollapsedHeadingLines] = useState<number[]>([]);
   const [tabs, setTabs] = useState<UiTab[]>([{ id: 'welcome', label: '시작', icon: '🏠' }]);
 
@@ -170,6 +185,40 @@ export function App() {
 
     const items = await window.eduFixerApi.scanLogoReviewItems(savedFolderPath, 'py_lgbm');
     setLogoReviewItems(items);
+  }
+
+  async function refreshSentenceReviewItems() {
+    const items = await window.eduFixerApi?.getSentenceReviewItems();
+    setSentenceReviewItems(items ?? []);
+  }
+
+  function mergeSavedReviewItems(items: ReviewItem[]) {
+    if (!items.length) {
+      return;
+    }
+
+    const hierarchyItems = items.filter(
+      (item): item is HierarchyPatternReviewItem => item.type === 'hierarchy_pattern',
+    );
+    const sentenceItems = items.filter(
+      (item): item is SentenceEditReviewItem => item.type === 'sentence_edit',
+    );
+
+    if (hierarchyItems.length) {
+      setHierarchyReviewItems((current) => {
+        const next = new Map(current.map((item) => [item.id, item]));
+        hierarchyItems.forEach((item) => next.set(item.id, item));
+        return [...next.values()];
+      });
+    }
+
+    if (sentenceItems.length) {
+      setSentenceReviewItems((current) => {
+        const next = new Map(current.map((item) => [item.id, item]));
+        sentenceItems.forEach((item) => next.set(item.id, item));
+        return [...next.values()];
+      });
+    }
   }
 
   async function refreshMlDatasetStats() {
@@ -262,16 +311,8 @@ export function App() {
 
   function changeEditorMode(nextMode: EditorMode) {
     setEditorMode(nextMode);
-    if (currentEditorLine) {
-      setScrollRequest({ line: currentEditorLine, token: Date.now() });
-      if (nextMode === 'preview') {
-        setSelectedPreviewLine((current) => current ?? {
-          line: currentEditorLine,
-          endLine: currentEditorLine,
-          activeLine: currentEditorLine,
-          label: `${currentEditorLine}행 선택`,
-        });
-      }
+    if (nextMode === 'preview') {
+      setPreviewSelectionMode('block');
     }
   }
 
@@ -329,13 +370,13 @@ export function App() {
   }, [isSidebarResizing]);
 
   useEffect(() => {
-    if (!currentDocument?.filePath) {
+    if (!currentDocument?.filePath || !isEditableMode(editorMode)) {
       return;
     }
 
     const payload: StoredEditorSession = {
       filePath: currentDocument.filePath,
-      line: currentEditorLine,
+      line: normalizeSessionLine(currentEditorLine),
       editorMode,
     };
     window.localStorage.setItem(LAST_EDITOR_SESSION_STORAGE_KEY, JSON.stringify(payload));
@@ -361,20 +402,72 @@ export function App() {
   }, [fontSettings, theme]);
 
   useEffect(() => {
-    void refreshPersistedExplorerFolder(includeExplorerSubfolders);
-    void refreshPersistedLogoReviewItems();
-    void refreshMlDatasetStats();
-    void refreshSyncStatus();
+    const runStartupRefresh = () => {
+      void refreshPersistedExplorerFolder(includeExplorerSubfolders);
+      void refreshPersistedLogoReviewItems();
+      void refreshSentenceReviewItems();
+      void refreshMlDatasetStats();
+      void refreshSyncStatus();
+    };
+
+    runStartupRefresh();
+    const retryTimers = [
+      window.setTimeout(runStartupRefresh, 300),
+      window.setTimeout(runStartupRefresh, 1200),
+    ];
+    return () => {
+      retryTimers.forEach((timer) => window.clearTimeout(timer));
+    };
   }, []);
 
   useEffect(() => {
-    window.eduFixerApi?.getShellState().then((shellState) => {
+    let disposed = false;
+
+    async function loadShellStateAndRestoreEditorSession() {
+      const shellState = await window.eduFixerApi?.getShellState();
+      if (disposed || !shellState) {
+        return;
+      }
       setRecentDocuments(shellState.recentDocuments);
-    });
+
+      const raw = window.localStorage.getItem(LAST_EDITOR_SESSION_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+
+      let session: StoredEditorSession | null = null;
+      try {
+        session = JSON.parse(raw) as StoredEditorSession;
+      } catch {
+        session = null;
+      }
+
+      if (!session?.filePath) {
+        return;
+      }
+
+      const reopened = await window.eduFixerApi?.openRecent(session.filePath);
+      if (disposed || !reopened) {
+        return;
+      }
+
+      const restoreMode = normalizeSessionEditorMode(session.editorMode);
+      const restoreLine = normalizeSessionLine(session.line);
+      setEditorMode(restoreMode);
+      openShellDocument(reopened, { initialLine: restoreLine });
+    }
+
+    void loadShellStateAndRestoreEditorSession();
+    return () => {
+      disposed = true;
+    };
   }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (activeView !== 'editor' || !currentDocument) {
+        return;
+      }
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') {
         return;
       }
@@ -392,12 +485,13 @@ export function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [currentDocument]);
+  }, [activeView, currentDocument]);
 
   useEffect(() => {
     const handleWindowFocus = () => {
       refreshPersistedExplorerFolder();
       refreshPersistedLogoReviewItems();
+      refreshSentenceReviewItems();
       refreshMlDatasetStats();
       refreshSyncStatus();
     };
@@ -417,6 +511,32 @@ export function App() {
     return () => window.clearTimeout(timeout);
   }, [toastMessage]);
 
+  useEffect(() => {
+    if (!scrollRequest) {
+      return;
+    }
+
+    const token = scrollRequest.token;
+    const timer = window.setTimeout(() => {
+      setScrollRequest((current) => (current?.token === token ? null : current));
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [scrollRequest]);
+
+  useEffect(() => {
+    if (!selectionRequest) {
+      return;
+    }
+
+    const token = selectionRequest.token;
+    const timer = window.setTimeout(() => {
+      setSelectionRequest((current) => (current?.token === token ? null : current));
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [selectionRequest]);
+
   function openView(view: ViewId, tabId: string = view) {
     if (view !== 'upload') {
       setUploadSelection(null);
@@ -424,6 +544,33 @@ export function App() {
     setActiveView(view);
     setActiveTab(tabId);
   }
+
+  function handleLocationSurfaceChange(next: 'Edit' | 'View' | 'Menu' | null) {
+    setLocationSurface((current) => (current === next ? current : next));
+  }
+
+  useEffect(() => {
+    if (editorMode === 'preview') {
+      setLocationSurface((current) => (current === 'View' ? current : 'View'));
+      return;
+    }
+    if (editorMode === 'markdown' || editorMode === 'html' || editorMode === 'wysiwyg') {
+      setLocationSurface((current) => (current === 'Edit' ? current : 'Edit'));
+    }
+  }, [editorMode]);
+
+  useEffect(() => {
+    if (activePanel !== 'md-menu') {
+      return;
+    }
+
+    const hasMarkdownEditor =
+      activeView === 'editor' &&
+      Boolean(currentDocument?.fileName.toLowerCase().endsWith('.md'));
+    if (!hasMarkdownEditor) {
+      setActivePanel('explorer');
+    }
+  }, [activePanel, activeView, currentDocument?.fileName]);
 
   function ensureTab(tab: UiTab) {
     setTabs((current) => {
@@ -434,13 +581,16 @@ export function App() {
     });
   }
 
-  function openShellDocument(doc: ShellDocument) {
+  function openShellDocument(doc: ShellDocument, options?: { initialLine?: number }) {
+    const initialLine = normalizeSessionLine(options?.initialLine ?? 1);
     setOpenDocuments((current) => ({ ...current, [doc.id]: doc }));
     setCurrentDocument(doc);
     setCollapsedHeadingLines([]);
-    setScrollRequest(null);
+    setScrollRequest({ line: initialLine, token: Date.now() + Math.random() });
+    setSelectionRequest(null);
     setSelectedPreviewLine(null);
-    setCurrentEditorLine(null);
+    setCurrentEditorLine(initialLine);
+    setCurrentPreviewLine(initialLine);
     setRecentDocuments((current) => upsertRecentDocument(current, doc));
     ensureTab({ id: doc.id, label: doc.fileName, icon: getFileIcon(doc.fileName) });
     openView('editor', doc.id);
@@ -526,6 +676,7 @@ export function App() {
     ensureTab({ id: doc.id, label: doc.fileName, icon: getFileIcon(doc.fileName) });
     setActiveView('editor');
     setActiveTab(doc.id);
+    mergeSavedReviewItems(saved.reviewItems);
     await refreshMlDatasetStats();
     setToastMessage(saved.editPatchCount > 0 ? `ML 데이터 패치 ${saved.editPatchCount}건 저장` : '저장됨');
   }
@@ -551,6 +702,7 @@ export function App() {
     ensureTab({ id: doc.id, label: doc.fileName, icon: getFileIcon(doc.fileName) });
     setActiveView('editor');
     setActiveTab(doc.id);
+    mergeSavedReviewItems(saved.reviewItems);
     await refreshMlDatasetStats();
     setToastMessage(saved.editPatchCount > 0 ? `ML 데이터 패치 ${saved.editPatchCount}건 저장` : '다른 이름으로 저장됨');
   }
@@ -760,6 +912,18 @@ export function App() {
       return;
     }
 
+    if (item.type === 'sentence_edit') {
+      const result = await window.eduFixerApi?.resolveSentenceReviewItem({
+        id: item.id,
+        action,
+      });
+      if (!result?.ok) {
+        return;
+      }
+      setSentenceReviewItems((current) => current.filter((entry) => entry.id !== item.id));
+      return;
+    }
+
     await handleResolveLogoReviewItem(item, action);
   }
 
@@ -776,6 +940,18 @@ export function App() {
     setCurrentDocument((current) => {
       if (!current) {
         return current;
+      }
+      if (current.content !== content) {
+        const monitorPayload = buildAppMonitorPayload({
+          beforeContent: current.content,
+          afterContent: content,
+          documentPath: current.filePath,
+          documentName: current.fileName,
+          mode: editorMode,
+        });
+        if (monitorPayload) {
+          console.info('[js_change_monitor]', monitorPayload);
+        }
       }
       const next = { ...current, content };
       setOpenDocuments((docs) => ({ ...docs, [next.id]: next }));
@@ -817,21 +993,43 @@ export function App() {
     });
   }
 
-  function jumpToSearchMatch(match: { lineNumber: number; start: number; end: number }, query: string) {
+  function navigateToDocumentLine(
+    lineNumber: number,
+    options?: {
+      startColumn?: number;
+      endColumn?: number;
+      previewLabel?: string;
+      selectPreviewLine?: boolean;
+    },
+  ) {
     setActiveView('editor');
-    setCurrentEditorLine(match.lineNumber);
-    setSearchSelection({
-      lineNumber: match.lineNumber,
-      start: match.start,
-      end: match.end,
-      query,
-    });
-    setSelectedPreviewLine(null);
+    setCurrentEditorLine(lineNumber);
+    setCurrentPreviewLine(lineNumber);
+    setSelectionRequest({ line: lineNumber, token: Date.now() + Math.random() });
+    if (options?.selectPreviewLine === false) {
+      setSelectedPreviewLine(null);
+    } else {
+      setSelectedPreviewLine({
+        line: lineNumber,
+        endLine: lineNumber,
+        activeLine: lineNumber,
+        label: options?.previewLabel ?? `${lineNumber}행 선택`,
+      });
+    }
     setScrollRequest({
-      line: match.lineNumber,
+      line: lineNumber,
+      startColumn: options?.startColumn,
+      endColumn: options?.endColumn,
+      token: Date.now(),
+    });
+  }
+
+  function jumpToSearchMatch(match: { lineNumber: number; start: number; end: number }, query: string) {
+    navigateToDocumentLine(match.lineNumber, {
       startColumn: match.start,
       endColumn: match.end,
-      token: Date.now(),
+      previewLabel: `${match.lineNumber}행 검색 결과`,
+      selectPreviewLine: false,
     });
   }
 
@@ -846,19 +1044,82 @@ export function App() {
 
     openShellDocument(doc);
     setTimeout(() => {
-      jumpToSearchMatch(match, match.lineText.slice(match.start, match.end));
+      navigateToDocumentLine(match.lineNumber, {
+        startColumn: match.start,
+        endColumn: match.end,
+        previewLabel: `${match.lineNumber}행 검색 결과`,
+        selectPreviewLine: false,
+      });
     }, 0);
   }
 
-  const reviewItems: ReviewItem[] = [...logoReviewItems, ...hierarchyReviewItems];
-  const showMdMenu = Boolean(currentDocument?.fileName.toLowerCase().endsWith('.md'));
+  async function handleOpenEditorReviewItem(item: ReviewItem) {
+    if (item.type === 'logo_candidate') {
+      return;
+    }
+
+    const filePath = item.markdownPath || item.sourcePdfPath;
+    if (!filePath) {
+      return;
+    }
+
+    const doc =
+      Object.values(openDocuments).find((entry) => entry.filePath === filePath) ??
+      (await window.eduFixerApi?.openRecent(filePath)) ??
+      null;
+    if (!doc) {
+      return;
+    }
+
+    openShellDocument(doc);
+    const targetLine = item.type === 'sentence_edit'
+      ? item.lineStart
+      : item.sampleLines[0] ?? 1;
+
+    setTimeout(() => {
+      navigateToDocumentLine(targetLine);
+    }, 0);
+  }
+
+  const reviewItems: ReviewItem[] = [...logoReviewItems, ...hierarchyReviewItems, ...sentenceReviewItems];
+  const selectionModeLabel =
+    previewSelectionMode === 'block'
+      ? '현재: 블록 선택'
+      : previewSelectionMode === 'line'
+        ? '현재: 라인 선택'
+        : '현재: 문자 선택';
+  const selectionStatusLabel = `상태: 블록 ${currentDocument?.blockCount ?? 0}개 · 잠시대기`;
+  const showMdMenu = activeView === 'editor' && Boolean(currentDocument?.fileName.toLowerCase().endsWith('.md'));
+  const canEdit = activeView === 'editor' && Boolean(currentDocument);
   const activeSearchFolderPath = explorerFolder?.path ?? getParentFolderPath(currentDocument?.filePath);
+  const locationBaseLine = locationSurface === 'View' ? currentPreviewLine : currentEditorLine;
   const normalizedCurrentLine = getCollapsedHeadingOwnerLine(
     currentDocument?.content ?? '',
-    currentEditorLine,
+    locationBaseLine,
     collapsedHeadingLines,
   );
 
+  useEffect(() => {
+    if (activeView !== 'editor' || !currentDocument) {
+      return;
+    }
+    console.log('[location_sync]', {
+      surface: locationSurface,
+      line: normalizedCurrentLine ?? null,
+      editorLine: currentEditorLine ?? null,
+      previewLine: currentPreviewLine ?? null,
+      mode: editorMode,
+      file: currentDocument.fileName,
+    });
+  }, [
+    activeView,
+    currentDocument,
+    locationSurface,
+    normalizedCurrentLine,
+    currentEditorLine,
+    currentPreviewLine,
+    editorMode,
+  ]);
   return (
     <div className="app">
       <TitleBar
@@ -867,6 +1128,8 @@ export function App() {
         onOpenFolder={handleOpenFolder}
         onSave={() => { void handleSaveCurrentDocument(); }}
         onSaveAs={() => { void handleSaveAsCurrentDocument(); }}
+        canSave={activeView === 'editor' && Boolean(currentDocument)}
+        canEdit={canEdit}
       />
 
       <div className="workbench">
@@ -905,41 +1168,41 @@ export function App() {
             />
           ) : null}
           {activePanel === 'md-menu' ? (
-            <MdMenuPanel
-              key={currentDocument?.id ?? 'md-menu'}
-              document={currentDocument}
-              activeLine={normalizedCurrentLine}
-              collapsedLineNumbers={collapsedHeadingLines}
-              onToggleHeadingCollapse={(lineNumber) => {
-                setCollapsedHeadingLines((current) =>
-                  current.includes(lineNumber)
-                    ? current.filter((value) => value !== lineNumber)
-                    : [...current, lineNumber],
-                );
-              }}
-              onSelectHeading={(lineNumber) => {
-                setActiveView('editor');
-                setCurrentEditorLine(lineNumber);
-                setSelectedPreviewLine({ line: lineNumber, endLine: lineNumber, activeLine: lineNumber, label: `${lineNumber}행 선택` });
-                setScrollRequest({ line: lineNumber, token: Date.now() });
-              }}
-            />
+            <div>
+              <MdMenuPanel
+                key={currentDocument?.id ?? 'md-menu'}
+                document={currentDocument}
+                activeLine={normalizedCurrentLine}
+                collapsedLineNumbers={collapsedHeadingLines}
+                onToggleHeadingCollapse={(lineNumber) => {
+                  setCollapsedHeadingLines((current) =>
+                    current.includes(lineNumber)
+                      ? current.filter((value) => value !== lineNumber)
+                      : [...current, lineNumber],
+                  );
+                }}
+                onSelectHeading={(lineNumber) => {
+                  navigateToDocumentLine(lineNumber, { selectPreviewLine: false });
+                }}
+              />
+            </div>
           ) : null}
           {activePanel === 'search' ? (
             <SearchPanel
               document={currentDocument}
               folderPath={activeSearchFolderPath}
-              activeLine={normalizedCurrentLine}
+              activeLine={null}
+              searchSelection={null}
               mode={searchPanelState.mode}
               scope={searchPanelState.scope}
               query={searchPanelState.query}
               replaceValue={searchPanelState.replaceValue}
               selectedIndex={searchPanelState.selectedIndex}
-              onModeChange={(mode) => setSearchPanelState((current) => ({ ...current, mode }))}
-              onScopeChange={(scope) => setSearchPanelState((current) => ({ ...current, scope }))}
-              onQueryChange={(query) => setSearchPanelState((current) => ({ ...current, query }))}
-              onReplaceValueChange={(replaceValue) => setSearchPanelState((current) => ({ ...current, replaceValue }))}
-              onSelectedIndexChange={(selectedIndex) => setSearchPanelState((current) => ({ ...current, selectedIndex }))}
+              onModeChange={(mode) => setSearchPanelState((current) => (current.mode === mode ? current : { ...current, mode }))}
+              onScopeChange={(scope) => setSearchPanelState((current) => (current.scope === scope ? current : { ...current, scope }))}
+              onQueryChange={(query) => setSearchPanelState((current) => (current.query === query ? current : { ...current, query }))}
+              onReplaceValueChange={(replaceValue) => setSearchPanelState((current) => (current.replaceValue === replaceValue ? current : { ...current, replaceValue }))}
+              onSelectedIndexChange={(selectedIndex) => setSearchPanelState((current) => (current.selectedIndex === selectedIndex ? current : { ...current, selectedIndex }))}
               onSelectResult={(match) => jumpToSearchMatch(match, match.lineText.slice(match.start, match.end))}
               onSelectFolderResult={openFileAndJumpToSearchMatch}
               onReplaceContent={handleContentChange}
@@ -998,21 +1261,26 @@ export function App() {
                     setSelectedPreviewLine(null);
                   }
                 }}
+                locationSurface={locationSurface}
+                onLocationSurfaceChange={handleLocationSurfaceChange}
                 document={currentDocument}
                 theme={theme}
-                activeLine={normalizedCurrentLine}
+                activeLine={locationBaseLine}
                 scrollRequest={scrollRequest}
+                selectionRequest={selectionRequest}
+                onSelectionRequestApplied={() => setSelectionRequest(null)}
                 selectedPreviewLine={selectedPreviewLine}
-                searchSelection={searchSelection}
+                searchSelection={null}
                 collapsedHeadingLines={collapsedHeadingLines}
                 onToggleCollapsedHeading={(lineNumber) => {
                   setCollapsedHeadingLines((current) => current.filter((value) => value !== lineNumber));
                 }}
-                onSelectPreviewLine={(selection) => {
-                  setSelectedPreviewLine(selection);
-                  setCurrentEditorLine(selection?.activeLine ?? selection?.line ?? null);
-                }}
-                onActiveLineChange={setCurrentEditorLine}
+                onSelectPreviewLine={() => {}}
+                onEditorActiveLineChange={(line) => setCurrentEditorLine((current) => (current === line ? current : line))}
+                onPreviewActiveLineChange={(line) => setCurrentPreviewLine((current) => (current === line ? current : line))}
+                focusOwner="none"
+                splitSyncEnabled={false}
+                splitScrollSyncMode="none"
                 onChangeContent={handleContentChange}
                 actionLabel={showMdMenu ? 'ML 위계체크' : null}
                 onAction={showMdMenu ? handleRunHierarchyCheck : null}
@@ -1025,6 +1293,7 @@ export function App() {
                 items={reviewItems}
                 onResolveItem={handleResolveReviewItem}
                 onApproveAll={handleApproveAllReviewItems}
+                onOpenEditorItem={handleOpenEditorReviewItem}
               />
             </div>
 
@@ -1052,7 +1321,13 @@ export function App() {
         </div>
       </div>
 
-      <StatusBar />
+      <StatusBar
+        theme={theme}
+        focusOwnerLabel="해제"
+        selectionModeLabel={selectionModeLabel}
+        selectionStatusLabel={selectionStatusLabel}
+        onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+      />
       {isTrainingAccessOpen ? (
         <div className="font-color-modal-backdrop" onClick={handleCloseTrainingAccess}>
           <div className="font-color-modal training-access-modal" onClick={(event) => event.stopPropagation()}>
@@ -1085,4 +1360,118 @@ export function App() {
       <ComponentMap />
     </div>
   );
+}
+
+function buildAppMonitorPayload({
+  beforeContent,
+  afterContent,
+  documentPath,
+  documentName,
+  mode,
+}: {
+  beforeContent: string;
+  afterContent: string;
+  documentPath?: string | null;
+  documentName?: string | null;
+  mode: EditorMode;
+}) {
+  const change = summarizeFirstTextChange(beforeContent, afterContent);
+  if (!change) {
+    return null;
+  }
+
+  return {
+    task_type: 'editor_change_monitor',
+    source: 'js',
+    mode,
+    document_path: documentPath ?? '',
+    document_name: documentName ?? '',
+    timestamp: new Date().toISOString(),
+    recommendation_hint: change.looksLikeHierarchy ? 'hierarchy_candidate' : 'sentence_candidate',
+    changes: [change],
+  };
+}
+
+function summarizeFirstTextChange(beforeContent: string, afterContent: string) {
+  if (beforeContent === afterContent) {
+    return null;
+  }
+
+  const beforeLines = beforeContent.split(/\r?\n/);
+  const afterLines = afterContent.split(/\r?\n/);
+  let start = 0;
+  while (
+    start < beforeLines.length
+    && start < afterLines.length
+    && beforeLines[start] === afterLines[start]
+  ) {
+    start += 1;
+  }
+
+  let beforeEnd = beforeLines.length - 1;
+  let afterEnd = afterLines.length - 1;
+  while (
+    beforeEnd >= start
+    && afterEnd >= start
+    && beforeLines[beforeEnd] === afterLines[afterEnd]
+  ) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
+
+  const beforeText = beforeLines.slice(start, beforeEnd + 1).join('\n');
+  const afterText = afterLines.slice(start, afterEnd + 1).join('\n');
+  const beforeTrimmed = beforeText.trim();
+  const afterTrimmed = afterText.trim();
+  const blankLineOnly = beforeTrimmed === '' && afterTrimmed === '';
+  const mergeByLineJoin = beforeText.includes('\n') && afterText !== '' && !afterText.includes('\n');
+  const splitByLineBreak = !beforeText.includes('\n') && beforeText !== '' && afterText.includes('\n');
+  const changeKind = mergeByLineJoin
+    ? 'merge'
+    : splitByLineBreak
+      ? 'split'
+      : beforeTrimmed && !afterTrimmed
+        ? 'delete'
+        : !beforeTrimmed && afterTrimmed
+          ? 'insert'
+          : 'replace';
+  const focusText = afterTrimmed || beforeTrimmed;
+  const looksLikeHierarchy = /^(#{1,6}\s+|\[[^\]]+\]|\d+\)|\(\d+\)|[①-⑳]\s+|[-*+]\s+)/.test(focusText);
+
+  if (blankLineOnly && !mergeByLineJoin && !splitByLineBreak) {
+    return null;
+  }
+
+  return {
+    fromLine: start + 1,
+    toLine: Math.max(start + 1, beforeEnd + 1),
+    insertedToLine: Math.max(start + 1, afterEnd + 1),
+    changeKind,
+    beforeText: clipMonitorText(beforeText),
+    afterText: clipMonitorText(afterText),
+    beforePreview: clipMonitorText(beforeTrimmed || '[empty]', 160),
+    afterPreview: clipMonitorText(afterTrimmed || '[empty]', 160),
+    leftContext: sliceMonitorContext(beforeLines.slice(Math.max(0, start - 2), start).join(' '), false),
+    rightContext: sliceMonitorContext(afterLines.slice(afterEnd + 1, Math.min(afterLines.length, afterEnd + 3)).join(' '), true),
+    blankLineOnly,
+    looksLikeHierarchy,
+    headingMarkerAdded: !beforeTrimmed.startsWith('#') && afterTrimmed.startsWith('#'),
+    headingMarkerRemoved: beforeTrimmed.startsWith('#') && !afterTrimmed.startsWith('#'),
+  };
+}
+
+function sliceMonitorContext(value: string, fromStart: boolean) {
+  const words = String(value || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) {
+    return '';
+  }
+  return fromStart ? words.slice(0, 5).join(' ') : words.slice(-5).join(' ');
+}
+
+function clipMonitorText(value: string, maxLength = 400) {
+  const text = String(value || '');
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}...[${text.length - maxLength} more chars]`;
 }

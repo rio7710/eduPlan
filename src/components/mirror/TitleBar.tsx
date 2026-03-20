@@ -4,9 +4,11 @@ type Props = {
   onOpenFolder: () => void;
   onSave: () => void;
   onSaveAs: () => void;
+  canSave: boolean;
+  canEdit: boolean;
 };
 
-export function TitleBar({ onOpenUpload, onOpenFile, onOpenFolder, onSave, onSaveAs }: Props) {
+export function TitleBar({ onOpenUpload, onOpenFile, onOpenFolder, onSave, onSaveAs, canSave, canEdit }: Props) {
   return (
     <div className="titlebar">
       <div className="titlebar-left">
@@ -20,18 +22,18 @@ export function TitleBar({ onOpenUpload, onOpenFile, onOpenFolder, onSave, onSav
               <button className="title-menu-item" onClick={onOpenFile}>파일 열기</button>
               <button className="title-menu-item" onClick={onOpenFolder}>폴더 열기</button>
               <div className="title-menu-separator"></div>
-              <button className="title-menu-item" onClick={onSave}>저장 Ctrl+S</button>
-              <button className="title-menu-item" onClick={onSaveAs}>다른 이름으로 저장 Ctrl+Shift+S</button>
+              <button className="title-menu-item" onClick={onSave} disabled={!canSave}>저장 Ctrl+S</button>
+              <button className="title-menu-item" onClick={onSaveAs} disabled={!canSave}>다른 이름으로 저장 Ctrl+Shift+S</button>
             </div>
           </div>
           <div className="title-menu">
-            <button className="title-menu-btn">편집(E)</button>
+            <button className="title-menu-btn" disabled={!canEdit}>편집(E)</button>
             <div className="title-menu-dropdown">
-              <button className="title-menu-item">되돌리기</button>
-              <button className="title-menu-item">다시 실행</button>
+              <button className="title-menu-item" disabled={!canEdit}>되돌리기</button>
+              <button className="title-menu-item" disabled={!canEdit}>다시 실행</button>
               <div className="title-menu-separator"></div>
-              <button className="title-menu-item">찾기</button>
-              <button className="title-menu-item">바꾸기</button>
+              <button className="title-menu-item" disabled={!canEdit}>찾기</button>
+              <button className="title-menu-item" disabled={!canEdit}>바꾸기</button>
             </div>
           </div>
         </div>

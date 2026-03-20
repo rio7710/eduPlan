@@ -1,4 +1,12 @@
-export function StatusBar() {
+type Props = {
+  theme: 'dark' | 'light';
+  focusOwnerLabel: string;
+  selectionModeLabel: string;
+  selectionStatusLabel: string;
+  onToggleTheme: () => void;
+};
+
+export function StatusBar({ theme, focusOwnerLabel, selectionModeLabel, selectionStatusLabel, onToggleTheme }: Props) {
   return (
     <div className="statusbar">
       <div className="status-left">
@@ -11,6 +19,16 @@ export function StatusBar() {
       </div>
       <div className="status-right">
         <span className="status-item" id="status-doc-info">블록 0개</span>
+        <span className="status-sep">|</span>
+        <span className="status-item">{selectionModeLabel}</span>
+        <span className="status-sep">|</span>
+        <span className="status-item">{selectionStatusLabel}</span>
+        <span className="status-sep">|</span>
+        <span className="status-item status-focus-cell">포커스: {focusOwnerLabel}</span>
+        <span className="status-sep">|</span>
+        <button type="button" className="status-item status-toggle" onClick={onToggleTheme}>
+          {theme === 'dark' ? '다크 모드' : '라이트 모드'}
+        </button>
         <span className="status-sep">|</span>
         <span className="status-item">팀: 3명 접속 중</span>
         <span className="status-sep">|</span>

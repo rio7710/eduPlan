@@ -8,7 +8,6 @@ type Props = {
   onToggleAutoWrap: () => void;
   previewSelectionMode: PreviewSelectionMode;
   onChangePreviewSelectionMode: (mode: PreviewSelectionMode) => void;
-  document: ShellDocument | null;
 };
 
 export function ModeToggleBar({
@@ -18,16 +17,7 @@ export function ModeToggleBar({
   onToggleAutoWrap,
   previewSelectionMode,
   onChangePreviewSelectionMode,
-  document,
 }: Props) {
-  const blockCount = document?.blockCount ?? 6;
-  const selectionModeLabel =
-    previewSelectionMode === 'block'
-      ? '블록 선택'
-      : previewSelectionMode === 'line'
-        ? '라인 선택'
-        : '문자 선택';
-
   return (
     <div className="mode-togglebar">
       <div className="mode-toggle-group">
@@ -37,6 +27,9 @@ export function ModeToggleBar({
           </DelayedTooltip>
           <DelayedTooltip content="미리보기 모드">
             <button className={`mode-btn ${editorMode === 'preview' ? 'active' : ''}`} id="mode-preview" onClick={() => onChangeMode('preview')}><span className="mode-icon">👁</span> 보기</button>
+          </DelayedTooltip>
+          <DelayedTooltip content="Markdown 편집과 보기를 함께 보는 반창 모드">
+            <button className={`mode-btn ${editorMode === 'split' ? 'active' : ''}`} id="mode-split" onClick={() => onChangeMode('split')}><span className="mode-icon">⊞</span> 반창모드</button>
           </DelayedTooltip>
         </div>
         <div className="mode-pair-sep"></div>
@@ -53,14 +46,14 @@ export function ModeToggleBar({
         </div>
       </div>
       <div className="mode-info" id="mode-info">
-        {editorMode === 'preview' ? (
+        {editorMode === 'preview' || editorMode === 'split' ? (
           <div className="preview-selection-switch" role="tablist" aria-label="보기 선택 방식">
-            <DelayedTooltip content="구분선 블록 단위 선택">
+            <DelayedTooltip content="일반 텍스트 드래그 선택">
               <button
-                className={`mode-btn compact ${previewSelectionMode === 'block' ? 'active' : ''}`}
-                onClick={() => onChangePreviewSelectionMode('block')}
+                className={`mode-btn compact ${previewSelectionMode === 'text' ? 'active' : ''}`}
+                onClick={() => onChangePreviewSelectionMode('text')}
               >
-                블록 선택
+                문자 선택
               </button>
             </DelayedTooltip>
             <DelayedTooltip content="보이는 줄 단위 선택">
@@ -71,20 +64,16 @@ export function ModeToggleBar({
                 라인 선택
               </button>
             </DelayedTooltip>
-            <DelayedTooltip content="일반 텍스트 드래그 선택">
+            <DelayedTooltip content="구분선 블록 단위 선택">
               <button
-                className={`mode-btn compact ${previewSelectionMode === 'text' ? 'active' : ''}`}
-                onClick={() => onChangePreviewSelectionMode('text')}
+                className={`mode-btn compact ${previewSelectionMode === 'block' ? 'active' : ''}`}
+                onClick={() => onChangePreviewSelectionMode('block')}
               >
-                문자 선택
+                블록 선택
               </button>
             </DelayedTooltip>
           </div>
         ) : null}
-        <span className="mode-current-label" id="editor-doc-meta">
-          {editorMode === 'preview' ? `현재: ${selectionModeLabel} · ` : ''}
-          {`블록 ${blockCount}개 · 잠시대기`}
-        </span>
       </div>
     </div>
   );
