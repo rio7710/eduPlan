@@ -121,7 +121,7 @@ export function App() {
   const [editorMode, setEditorMode] = useState<EditorMode>('preview');
   const [previewSelectionMode, setPreviewSelectionMode] = useState<PreviewSelectionMode>(() => {
     const savedMode = window.localStorage.getItem(PREVIEW_SELECTION_MODE_STORAGE_KEY);
-    return savedMode === 'block' || savedMode === 'line' || savedMode === 'text' ? savedMode : 'text';
+    return savedMode === 'block' || savedMode === 'line' || savedMode === 'text' ? savedMode : 'line';
   });
   const [autoWrap, setAutoWrap] = useState<boolean>(() => window.localStorage.getItem('eduplan-auto-wrap') !== 'off');
   const [fontSettings, setFontSettings] = useState<FontSettings>(() => readStoredFontSettings());
@@ -469,9 +469,6 @@ export function App() {
       issueScrollSyncRequest({ target: 'Edit', line: targetLine });
     }
     setEditorMode(nextMode);
-    if (nextMode === 'preview') {
-      setPreviewSelectionMode('block');
-    }
   }
 
   useEffect(() => {
@@ -1477,24 +1474,22 @@ export function App() {
             />
           ) : null}
           {activePanel === 'md-menu' ? (
-            <div>
-              <MdMenuPanel
-                key={currentDocument?.id ?? 'md-menu'}
-                document={currentDocument}
-                activeLine={normalizedCurrentLine}
-                collapsedLineNumbers={collapsedHeadingLines}
-                onToggleHeadingCollapse={(lineNumber) => {
-                  setCollapsedHeadingLines((current) =>
-                    current.includes(lineNumber)
-                      ? current.filter((value) => value !== lineNumber)
-                      : [...current, lineNumber],
-                  );
-                }}
-                onSelectHeading={(lineNumber) => {
-                  navigateToDocumentLine(lineNumber, { selectPreviewLine: false });
-                }}
-              />
-            </div>
+            <MdMenuPanel
+              key={currentDocument?.id ?? 'md-menu'}
+              document={currentDocument}
+              activeLine={normalizedCurrentLine}
+              collapsedLineNumbers={collapsedHeadingLines}
+              onToggleHeadingCollapse={(lineNumber) => {
+                setCollapsedHeadingLines((current) =>
+                  current.includes(lineNumber)
+                    ? current.filter((value) => value !== lineNumber)
+                    : [...current, lineNumber],
+                );
+              }}
+              onSelectHeading={(lineNumber) => {
+                navigateToDocumentLine(lineNumber, { selectPreviewLine: false });
+              }}
+            />
           ) : null}
           {activePanel === 'search' ? (
             <SearchPanel

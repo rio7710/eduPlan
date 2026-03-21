@@ -1,6 +1,6 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PreviewSelectionMode } from '@/App';
 import { getCollapsedHeadingOwnerLine } from '@/lib/headingSections';
 
@@ -183,6 +183,17 @@ function stripLineBulletsForCopy(text: string) {
     .join('\n');
 }
 
+function compactCopyLineBreaks(text: string) {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/\u00A0/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/g, ''))
+    .join('\n')
+    .replace(/\n[ \t]*\n+/g, '\n')
+    .trim();
+}
+
 function stripPreviewComments(markdown: string) {
   return markdown
     .replace(/<!--[\s\S]*?-->/g, '')
@@ -190,6 +201,19 @@ function stripPreviewComments(markdown: string) {
     .replace(/^\[comment\]:\s*#\s*\(.*\)\s*$/gim, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+function normalizeLegacyBulletPrefixes(markdown: string) {
+  // Normalize copied dingbat/private-use bullets (Word/PPT/PDF artifacts) to markdown list markers.
+  return markdown
+    .split(/\r?\n/)
+    .map((line) =>
+      line.replace(
+        /^(\s*)(?:[\u2022\u25E6\u25AA\u25CF\u00B7\u2219\u2023\u2043\u25B8\u25B6\u25C6\u2713\u2714\u2717\u2718\u271A\u2611\u2610\uF000-\uF8FF])\s+/u,
+        '$1- ',
+      ),
+    )
+    .join('\n');
 }
 
 function escapeNumericRangeTildes(markdown: string) {
@@ -235,28 +259,18 @@ function normalizePreviewText(value: string) {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-function serializeSelectionText(selection: Selection, previewRoot: HTMLElement) {
-  const text = selection.toString();
-  if (!text.trim() || selection.rangeCount === 0) {
-    return '';
+function unwrapElementKeepText(element: HTMLElement) {
+  const parent = element.parentNode;
+  if (!parent) {
+    return;
   }
-
-  const anchorNode = selection.anchorNode;
-  const focusNode = selection.focusNode;
-  const insidePreview = Boolean(
-    anchorNode &&
-    focusNode &&
-    previewRoot.contains(anchorNode) &&
-    previewRoot.contains(focusNode),
-  );
-  if (!insidePreview) {
-    return '';
+  while (element.firstChild) {
+    parent.insertBefore(element.firstChild, element);
   }
+  parent.removeChild(element);
+}
 
-  const fragment = selection.getRangeAt(0).cloneContents();
-  const wrapper = document.createElement('div');
-  wrapper.append(fragment);
-
+function normalizeCopiedFragmentForPlainText(wrapper: HTMLDivElement) {
   wrapper.querySelectorAll<HTMLElement>('.preview-colon-pair').forEach((pair) => {
     const label = normalizePreviewText(pair.querySelector<HTMLElement>('.preview-colon-label')?.textContent ?? '');
     const valueNode = pair.querySelector<HTMLElement>('.preview-colon-value');
@@ -268,8 +282,108 @@ function serializeSelectionText(selection: Selection, previewRoot: HTMLElement) 
     const replacement = [label, value ? `➡ ${value}` : ''].filter(Boolean).join('\n');
     pair.replaceWith(document.createTextNode(replacement));
   });
+}
 
-  return wrapper.innerText.trim() || text;
+function normalizeCopiedFragmentForHtml(wrapper: HTMLDivElement, previewRoot?: HTMLElement | null) {
+  wrapper.querySelectorAll<HTMLElement>('.preview-search-match').forEach((mark) => {
+    unwrapElementKeepText(mark);
+  });
+
+  // Remove app-specific classes/styles that can shrink text in external apps (e.g., PPT).
+  wrapper.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    element.removeAttribute('class');
+    element.removeAttribute('style');
+  });
+
+  const rootStyle = previewRoot ? window.getComputedStyle(previewRoot) : null;
+  const baseFontFamily = rootStyle?.fontFamily || 'Malgun Gothic, Apple SD Gothic Neo, Segoe UI, sans-serif';
+  const baseFontSize = rootStyle?.fontSize || '16px';
+  const baseLineHeight = rootStyle?.lineHeight || '1.6';
+  const baseColor = rootStyle?.color || '#111111';
+
+  wrapper.style.fontFamily = baseFontFamily;
+  wrapper.style.fontSize = baseFontSize;
+  wrapper.style.lineHeight = baseLineHeight;
+  wrapper.style.color = baseColor;
+
+  wrapper.querySelectorAll<HTMLElement>('p, li, td, th, span, div').forEach((element) => {
+    element.style.fontSize = '1em';
+    element.style.lineHeight = '1.6';
+    element.style.color = baseColor;
+  });
+
+  wrapper.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6').forEach((heading) => {
+    heading.style.fontSize = '1.1em';
+    heading.style.lineHeight = '1.4';
+    heading.style.fontWeight = '700';
+    heading.style.margin = '0 0 0.35em 0';
+    heading.style.color = baseColor;
+  });
+
+  wrapper.querySelectorAll<HTMLTableElement>('table').forEach((table) => {
+    table.style.borderCollapse = 'collapse';
+    table.style.width = '100%';
+    table.style.fontSize = '1em';
+    table.style.lineHeight = '1.5';
+  });
+  wrapper.querySelectorAll<HTMLElement>('th, td').forEach((cell) => {
+    cell.style.border = '1px solid #888888';
+    cell.style.padding = '6px 8px';
+    cell.style.verticalAlign = 'top';
+    cell.style.fontSize = '1em';
+    cell.style.lineHeight = '1.5';
+    cell.style.color = baseColor;
+  });
+}
+
+function findClosestTable(node: Node | null) {
+  if (!node) {
+    return null;
+  }
+  const element = node instanceof HTMLElement ? node : node.parentElement;
+  return element?.closest<HTMLTableElement>('table') ?? null;
+}
+
+function serializeSelectionPayload(selection: Selection, previewRoot: HTMLElement) {
+  const text = selection.toString();
+  if (!text.trim() || selection.rangeCount === 0) {
+    return null;
+  }
+
+  const anchorNode = selection.anchorNode;
+  const focusNode = selection.focusNode;
+  const insidePreview = Boolean(
+    anchorNode &&
+    focusNode &&
+    previewRoot.contains(anchorNode) &&
+    previewRoot.contains(focusNode),
+  );
+  if (!insidePreview) {
+    return null;
+  }
+
+  const fragment = selection.getRangeAt(0).cloneContents();
+  const plainWrapper = document.createElement('div');
+  plainWrapper.append(fragment.cloneNode(true));
+  normalizeCopiedFragmentForPlainText(plainWrapper);
+  const plain = plainWrapper.innerText.trim() || text;
+
+  const htmlWrapper = document.createElement('div');
+  htmlWrapper.append(fragment);
+  normalizeCopiedFragmentForHtml(htmlWrapper, previewRoot);
+  const containsTableInFragment = Boolean(htmlWrapper.querySelector('table'));
+  const anchorTable = findClosestTable(selection.anchorNode);
+  const focusTable = findClosestTable(selection.focusNode);
+  const selectedTable = anchorTable && focusTable && anchorTable === focusTable
+    ? anchorTable
+    : anchorTable ?? focusTable;
+  const html = containsTableInFragment
+    ? htmlWrapper.innerHTML.trim()
+    : selectedTable
+      ? selectedTable.outerHTML
+      : undefined;
+
+  return { plain, html };
 }
 
 function applyColonLineBreak(markdown: string) {
@@ -342,8 +456,16 @@ function getPreviewBlocks(markdownText: string, colonBreakEnabled: boolean, ligh
       if (!markdown.trim()) {
         return;
       }
+
+      const previewMarkdownBase = normalizeLegacyBulletPrefixes(stripPreviewComments(markdown));
+      const previewMarkdownRaw = colonBreakEnabled ? applyColonLineBreak(previewMarkdownBase) : previewMarkdownBase;
+      const previewMarkdown = escapeNumericRangeTildes(previewMarkdownRaw);
+      if (!previewMarkdown.trim()) {
+        return;
+      }
+
       const html = attachHeadingLineAnchors(
-        DOMPurify.sanitize(marked.parse(markdown, { async: false }) as string),
+        DOMPurify.sanitize(marked.parse(previewMarkdown, { async: false }) as string),
         markdown,
         startIndex + 1,
       );
@@ -374,7 +496,7 @@ function getPreviewBlocks(markdownText: string, colonBreakEnabled: boolean, ligh
   if (lightweightMode) {
     const lines = markdownText.split(/\r?\n/);
     const markdown = lines.join('\n');
-    const previewMarkdownBase = stripPreviewComments(markdown);
+    const previewMarkdownBase = normalizeLegacyBulletPrefixes(stripPreviewComments(markdown));
     const previewMarkdownRaw = colonBreakEnabled ? applyColonLineBreak(previewMarkdownBase) : previewMarkdownBase;
     const previewMarkdown = escapeNumericRangeTildes(previewMarkdownRaw);
     const html = previewMarkdown
@@ -408,7 +530,7 @@ function getPreviewBlocks(markdownText: string, colonBreakEnabled: boolean, ligh
     }
 
     const markdown = rawLines.slice(startIndex, endIndex + 1).join('\n');
-    const previewMarkdownBase = stripPreviewComments(markdown);
+    const previewMarkdownBase = normalizeLegacyBulletPrefixes(stripPreviewComments(markdown));
     const previewMarkdownRaw = colonBreakEnabled ? applyColonLineBreak(previewMarkdownBase) : previewMarkdownBase;
     const previewMarkdown = escapeNumericRangeTildes(previewMarkdownRaw);
     const html = previewMarkdown
@@ -699,6 +821,66 @@ function resolveSourceLineFromPointer(container: HTMLElement | null, target: HTM
   return resolveSourceLineFromBlockPointer(target, clientY) ?? resolveHeadingLineFromClick(container, target, clientY);
 }
 
+function collapseSelectionToPointer(
+  container: HTMLElement | null,
+  target: HTMLElement | null,
+  clientX: number,
+  clientY: number,
+) {
+  if (!container) {
+    return;
+  }
+
+  const selection = window.getSelection();
+  if (!selection) {
+    return;
+  }
+
+  const doc = container.ownerDocument ?? document;
+  let nextRange: Range | null = null;
+  const caretPositionResolver = (doc as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  }).caretPositionFromPoint;
+  const caretRangeResolver = (doc as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  }).caretRangeFromPoint;
+
+  if (typeof caretPositionResolver === 'function') {
+    const position = caretPositionResolver.call(doc, clientX, clientY);
+    if (position?.offsetNode && container.contains(position.offsetNode)) {
+      const range = doc.createRange();
+      range.setStart(position.offsetNode, position.offset);
+      range.collapse(true);
+      nextRange = range;
+    }
+  } else if (typeof caretRangeResolver === 'function') {
+    const rangeAtPoint = caretRangeResolver.call(doc, clientX, clientY);
+    if (rangeAtPoint && container.contains(rangeAtPoint.startContainer)) {
+      const range = rangeAtPoint.cloneRange();
+      range.collapse(true);
+      nextRange = range;
+    }
+  }
+
+  if (!nextRange) {
+    const fallbackElement = target?.closest<HTMLElement>('[data-block-number]') ?? target;
+    if (!fallbackElement || !container.contains(fallbackElement)) {
+      return;
+    }
+    const boundary = findTextBoundaryInElement(fallbackElement, 'start');
+    if (!boundary) {
+      return;
+    }
+    const range = doc.createRange();
+    range.setStart(boundary.node, boundary.offset);
+    range.collapse(true);
+    nextRange = range;
+  }
+
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+}
+
 function findTextBoundaryInElement(element: HTMLElement, direction: 'start' | 'end') {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -733,13 +915,17 @@ function expandSelectionToStructuralElements(selection: Selection) {
     range.endContainer instanceof HTMLElement ? range.endContainer : range.endContainer.parentElement;
   const startNode = startElement?.closest<HTMLElement>(structuralSelector) ?? null;
   const endNode = endElement?.closest<HTMLElement>(structuralSelector) ?? null;
-  if (!startNode || !endNode) {
+  const startTable = startElement?.closest<HTMLElement>('table') ?? null;
+  const endTable = endElement?.closest<HTMLElement>('table') ?? null;
+  const startTarget = startTable ?? startNode;
+  const endTarget = endTable ?? endNode;
+  if (!startTarget || !endTarget) {
     return false;
   }
 
-  const ordered = startNode.compareDocumentPosition(endNode) & Node.DOCUMENT_POSITION_PRECEDING
-    ? [endNode, startNode]
-    : [startNode, endNode];
+  const ordered = startTarget.compareDocumentPosition(endTarget) & Node.DOCUMENT_POSITION_PRECEDING
+    ? [endTarget, startTarget]
+    : [startTarget, endTarget];
   const startBoundary = findTextBoundaryInElement(ordered[0], 'start');
   const endBoundary = findTextBoundaryInElement(ordered[1], 'end');
   if (!startBoundary || !endBoundary) {
@@ -932,17 +1118,58 @@ export function PreviewPane({
     renderText?: string,
   ) {
     onSelectLine?.(selection);
-    void reason;
-    void renderText;
+    if (reason.startsWith('block-')) {
+      setClickedBlockSelection({
+        startLine: selection.line,
+        endLine: selection.endLine ?? selection.line,
+      });
+    }
+    if (reason.startsWith('line-')) {
+      const plain = compactCopyLineBreaks(renderText ?? '');
+      if (plain) {
+        console.log(plain);
+      }
+    }
   }
 
   function normalizeClipboardText(text: string) {
-    return stripNumberCopyEnabled ? stripLineBulletsForCopy(text) : text;
+    const normalized = stripNumberCopyEnabled ? stripLineBulletsForCopy(text) : text;
+    return compactCopyLineBreaks(normalized);
   }
 
   function buildClipboardPayload(text: string) {
     return { plain: normalizeClipboardText(text), html: undefined as string | undefined };
   }
+
+  const copyFromCurrentSelection = useCallback((options?: { copyEvent?: ClipboardEvent; fallbackText?: string }) => {
+    const selection = window.getSelection();
+    const previewRoot = containerRef.current;
+    const selected =
+      selection && previewRoot
+        ? serializeSelectionPayload(selection, previewRoot)
+        : null;
+    const plain = selected?.plain || compactCopyLineBreaks(options?.fallbackText ?? '');
+    if (!plain) {
+      return false;
+    }
+
+    const payload = buildClipboardPayload(plain);
+    if (selected?.html) {
+      payload.html = selected.html;
+    }
+
+    const copyEvent = options?.copyEvent;
+    if (copyEvent) {
+      copyEvent.preventDefault();
+      copyEvent.clipboardData?.setData('text/plain', payload.plain);
+      if (payload.html) {
+        copyEvent.clipboardData?.setData('text/html', payload.html);
+      }
+    }
+
+    void writeClipboardText(payload);
+    return true;
+  }, [stripNumberCopyEnabled]);
 
   function findBlockContentBoundary(blockElement: HTMLElement, direction: 'start' | 'end') {
     const contentRoot = Array.from(blockElement.childNodes).find((node) => {
@@ -1296,34 +1523,8 @@ export function PreviewPane({
   }, [blocks, onActiveLineChange, onLocationTrigger, searchSelection, suppressActiveLineSync]);
 
   useEffect(() => {
-    const root = containerRef.current;
-    if (!root) {
-      return;
-    }
-    const previewRoot = root;
-
-    function getSelectedPreviewText() {
-      const selection = window.getSelection();
-      if (!selection) {
-        return '';
-      }
-
-      return serializeSelectionText(selection, previewRoot);
-    }
-
     function handleCopy(event: ClipboardEvent) {
-      const text = getSelectedPreviewText();
-      if (!text) {
-        return;
-      }
-
-      const payload = buildClipboardPayload(text);
-      event.preventDefault();
-      event.clipboardData?.setData('text/plain', payload.plain);
-      if (payload.html) {
-        event.clipboardData?.setData('text/html', payload.html);
-      }
-      void writeClipboardText(payload);
+      copyFromCurrentSelection({ copyEvent: event });
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -1331,23 +1532,82 @@ export function PreviewPane({
         return;
       }
 
-      const text = getSelectedPreviewText();
-      if (!text) {
+      if (!copyFromCurrentSelection()) {
+        return;
+      }
+      event.preventDefault();
+    }
+
+    document.addEventListener('copy', handleCopy, true);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('copy', handleCopy, true);
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [stripNumberCopyEnabled, copyFromCurrentSelection]);
+
+  useEffect(() => {
+    if (_selectionMode !== 'block') {
+      return;
+    }
+
+    function stabilizeBlockSelectionOnFocus() {
+      const root = containerRef.current;
+      if (!root || !effectiveBlockSelection) {
         return;
       }
 
-      const payload = buildClipboardPayload(text);
-      event.preventDefault();
-      void writeClipboardText(payload);
+      const selectedStart = Math.min(effectiveBlockSelection.startLine, effectiveBlockSelection.endLine);
+      const selectedEnd = Math.max(effectiveBlockSelection.startLine, effectiveBlockSelection.endLine);
+      const blockElements = Array.from(root.querySelectorAll<HTMLElement>('[data-block-number]'));
+      const firstBlock = blockElements.find((element) => {
+        const start = Number(element.dataset.startLine || 0);
+        const end = Number(element.dataset.endLine || 0);
+        return start <= selectedStart && end >= selectedStart;
+      }) ?? null;
+      const lastBlock = blockElements.find((element) => {
+        const start = Number(element.dataset.startLine || 0);
+        const end = Number(element.dataset.endLine || 0);
+        return start <= selectedEnd && end >= selectedEnd;
+      }) ?? firstBlock;
+      if (!firstBlock || !lastBlock) {
+        return;
+      }
+
+      const startBoundary = findBlockContentBoundary(firstBlock, 'start');
+      const endBoundary = findBlockContentBoundary(lastBlock, 'end');
+      if (!startBoundary || !endBoundary) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      if (selection) {
+        const range = document.createRange();
+        range.setStart(startBoundary.node, startBoundary.offset);
+        range.setEnd(endBoundary.node, endBoundary.offset);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+
+      firstBlock.scrollIntoView({ block: 'nearest', behavior: 'auto' });
     }
 
-      previewRoot.addEventListener('copy', handleCopy);
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      previewRoot.removeEventListener('copy', handleCopy);
-      window.removeEventListener('keydown', handleKeyDown, true);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        stabilizeBlockSelectionOnFocus();
+      }
     };
-  }, []);
+    const handleWindowFocus = () => {
+      stabilizeBlockSelectionOnFocus();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [_selectionMode, effectiveBlockSelection]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1417,12 +1677,24 @@ export function PreviewPane({
       className={`preview-pane ${autoWrap ? '' : 'preview-pane-nowrap'} ${selectionModeClass}`.trim()}
       onMouseDown={(event) => {
         onMouseFocus?.();
-        if (_selectionMode !== 'line') {
+        if (event.button !== 0) {
           return;
         }
-        lineSelectionAnchorLineRef.current = resolveSourceLineFromPointer(
+        if (_selectionMode !== 'line' && _selectionMode !== 'text') {
+          return;
+        }
+        const target = event.target as HTMLElement | null;
+        if (_selectionMode === 'line') {
+          lineSelectionAnchorLineRef.current = resolveSourceLineFromPointer(
+            containerRef.current,
+            target,
+            event.clientY,
+          );
+        }
+        collapseSelectionToPointer(
           containerRef.current,
-          event.target as HTMLElement | null,
+          target,
+          event.clientX,
           event.clientY,
         );
       }}
@@ -1528,6 +1800,9 @@ export function PreviewPane({
               activeLine: startLine,
               label: `${startLine}${endLine !== startLine ? `-${endLine}` : ''}행 선택`,
             }, 'line-pointer', selectedText);
+            if (autoCopyEnabled) {
+              copyFromCurrentSelection({ fallbackText: selectedText });
+            }
             commitLocationAtClickEnd();
             return;
           }
@@ -1541,7 +1816,7 @@ export function PreviewPane({
         }
 
         if (autoCopyEnabled) {
-          void writeClipboardText(buildClipboardPayload(selectedText));
+          copyFromCurrentSelection({ fallbackText: selectedText });
         }
 
         commitLocationAtClickEnd();
@@ -1549,48 +1824,71 @@ export function PreviewPane({
     >
       {blocks.length ? (
         blocks.map((block) => (
-          <div
-            key={`${block.startLine}-${block.endLine}-${block.blockNumber}`}
-            className="preview-html-block"
-            data-block-number={block.blockNumber}
-            data-start-line={block.startLine}
-            data-end-line={block.endLine}
-            onClick={(event) => {
-              if (_selectionMode !== 'block') {
-                return;
-              }
-              const target = event.target as HTMLElement | null;
-              if (target?.closest('.preview-collapsed-heading')) {
-                return;
-              }
+          (() => {
+            const selectedStart = effectiveBlockSelection
+              ? Math.min(effectiveBlockSelection.startLine, effectiveBlockSelection.endLine)
+              : null;
+            const selectedEnd = effectiveBlockSelection
+              ? Math.max(effectiveBlockSelection.startLine, effectiveBlockSelection.endLine)
+              : null;
+            const isSelected =
+              selectedStart !== null &&
+              selectedEnd !== null &&
+              block.endLine >= selectedStart &&
+              block.startLine <= selectedEnd;
+            const isActive = activeLine !== null && block.startLine <= activeLine && block.endLine >= activeLine;
+            const className = [
+              'preview-html-block',
+              _selectionMode === 'block' ? 'is-block-selectable' : '',
+              isSelected ? 'is-selected' : '',
+              isActive ? 'is-active-line' : '',
+            ].filter(Boolean).join(' ');
 
-              const blockElement = event.currentTarget as HTMLElement;
-              const startBoundary = findTextBoundaryInElement(blockElement, 'start');
-              const endBoundary = findTextBoundaryInElement(blockElement, 'end');
-              if (!startBoundary || !endBoundary) {
-                return;
-              }
+            return (
+              <div
+                key={`${block.startLine}-${block.endLine}-${block.blockNumber}`}
+                className={className}
+                data-block-number={block.blockNumber}
+                data-start-line={block.startLine}
+                data-end-line={block.endLine}
+                onClick={(event) => {
+                  if (_selectionMode !== 'block') {
+                    return;
+                  }
+                  const target = event.target as HTMLElement | null;
+                  if (target?.closest('.preview-collapsed-heading')) {
+                    return;
+                  }
 
-              const selection = window.getSelection();
-              if (!selection) {
-                return;
-              }
-              const range = document.createRange();
-              range.setStart(startBoundary.node, startBoundary.offset);
-              range.setEnd(endBoundary.node, endBoundary.offset);
-              selection.removeAllRanges();
-              selection.addRange(range);
+                  const blockElement = event.currentTarget as HTMLElement;
+                  const startBoundary = findTextBoundaryInElement(blockElement, 'start');
+                  const endBoundary = findTextBoundaryInElement(blockElement, 'end');
+                  if (!startBoundary || !endBoundary) {
+                    return;
+                  }
 
-              emitSelection({
-                line: block.startLine,
-                endLine: block.endLine,
-                activeLine: block.startLine,
-                label: `${block.startLine}${block.endLine !== block.startLine ? `-${block.endLine}` : ''}행 선택`,
-              }, 'block-click', selection.toString().trim());
-            }}
-          >
-            <div className="preview-html-content" dangerouslySetInnerHTML={{ __html: block.html }} />
-          </div>
+                  const selection = window.getSelection();
+                  if (!selection) {
+                    return;
+                  }
+                  const range = document.createRange();
+                  range.setStart(startBoundary.node, startBoundary.offset);
+                  range.setEnd(endBoundary.node, endBoundary.offset);
+                  selection.removeAllRanges();
+                  selection.addRange(range);
+
+                  emitSelection({
+                    line: block.startLine,
+                    endLine: block.endLine,
+                    activeLine: block.startLine,
+                    label: `${block.startLine}${block.endLine !== block.startLine ? `-${block.endLine}` : ''}행 선택`,
+                  }, 'block-click', selection.toString().trim());
+                }}
+              >
+                <div className="preview-html-content" dangerouslySetInnerHTML={{ __html: block.html }} />
+              </div>
+            );
+          })()
         ))
       ) : (
         <div className="empty-stage">미리볼 내용이 없습니다.</div>
