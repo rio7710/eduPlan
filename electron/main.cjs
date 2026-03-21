@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
@@ -8,6 +9,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 let mainWindow = null;
 let db = null;
+let updateCheckTimer = null;
 const rendererDevUrl = process.env.VITE_DEV_SERVER_URL;
 const TEXT_FILE_EXTENSIONS = new Set(['.txt', '.md', '.markdown', '.srt', '.vtt', '.html', '.htm']);
 const EXPLORER_FILE_EXTENSIONS = new Set([...TEXT_FILE_EXTENSIONS, '.pdf']);
@@ -1223,7 +1225,7 @@ async function analyzeSentenceEditsWithPython(filePath, fileName, previousConten
     before_content: String(previousContent || ''),
     after_content: String(nextContent || ''),
   };
-  const analyzeScriptPath = path.resolve(__dirname, '..', '..', 'scripts', 'analyze_sentence_edits.py');
+  const analyzeScriptPath = resolvePythonScriptPath('analyze_sentence_edits.py');
 
   try {
     await fs.writeFile(payloadPath, JSON.stringify(payload), 'utf8');
@@ -1690,7 +1692,7 @@ async function analyzeHierarchyPatterns(markdownPath) {
     return [];
   }
 
-  const analyzeScriptPath = path.resolve(__dirname, '..', '..', 'scripts', 'analyze_hierarchy_patterns.py');
+  const analyzeScriptPath = resolvePythonScriptPath('analyze_hierarchy_patterns.py');
   const { stdout } = await runPythonScript(
     [analyzeScriptPath, '--markdown', resolvedMarkdownPath],
     {
@@ -2195,7 +2197,7 @@ async function scoreLogoReviewItemsWithInference(reviewItems, inferenceEngine) {
   const tempDir = path.join(app.getPath('userData'), 'temp');
   await fs.mkdir(tempDir, { recursive: true });
   const candidatesPath = path.join(tempDir, `logo_candidates_${Date.now()}.json`);
-  const engineScriptPath = path.resolve(__dirname, '..', '..', 'scripts', 'logo_lgbm_engine.py');
+  const engineScriptPath = resolvePythonScriptPath('logo_lgbm_engine.py');
 
   try {
     await fs.writeFile(candidatesPath, JSON.stringify(candidates), 'utf8');
@@ -2244,6 +2246,22 @@ function runExecFile(command, args, options = {}) {
   });
 }
 
+function resolvePythonScriptPath(scriptName) {
+  const candidates = [
+    path.resolve(__dirname, '..', 'scripts', scriptName),
+    path.resolve(__dirname, '..', '..', 'scripts', scriptName),
+    path.resolve(process.resourcesPath || '', 'scripts', scriptName),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Python script not found: ${scriptName} (checked: ${candidates.join(', ')})`);
+}
+
 async function runPythonScript(args, options = {}) {
   const attempts = [
     { command: 'python', args },
@@ -2282,8 +2300,8 @@ async function convertPdfWithPython(pdfPath, inferenceEngine = 'py_only', sensit
   const resolvedPdfPath = path.resolve(pdfPath);
   const parsed = path.parse(resolvedPdfPath);
   const outputDir = path.join(parsed.dir, `${parsed.name}_py`);
-  const convertScriptPath = path.resolve(__dirname, '..', '..', 'scripts', 'pdf_to_md_pages.py');
-  const filterScriptPath = path.resolve(__dirname, '..', '..', 'scripts', 'filter_logo_images.py');
+  const convertScriptPath = resolvePythonScriptPath('pdf_to_md_pages.py');
+  const filterScriptPath = resolvePythonScriptPath('filter_logo_images.py');
   const reviewDir = path.join(outputDir, 'logo_review');
   console.log('[convert-pdf-python] start', { resolvedPdfPath, outputDir, convertScriptPath, filterScriptPath, sensitivity });
 
@@ -2343,7 +2361,7 @@ async function finalizeReviewTransfer(payload) {
 
   const outputDir = path.dirname(markdownPath);
   const imageDir = path.join(outputDir, 'image');
-  const finalizeScriptPath = path.resolve(__dirname, '..', '..', 'scripts', 'finalize_review_transfer.py');
+  const finalizeScriptPath = resolvePythonScriptPath('finalize_review_transfer.py');
   const runName = sanitizePathSegment(path.basename(outputDir)) || `review-${Date.now()}`;
   const centralDir = getMlDatasetRoot();
 
@@ -2431,6 +2449,59 @@ async function createWindow() {
   }
 }
 
+function setupAutoUpdater() {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('error', (error) => {
+    console.error('[auto-updater] error', error?.message || error);
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log('[auto-updater] update available', info?.version || info);
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('[auto-updater] no updates');
+  });
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    console.log('[auto-updater] downloaded', info?.version || info);
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      autoUpdater.quitAndInstall();
+      return;
+    }
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      buttons: ['지금 재시작', '나중에'],
+      defaultId: 0,
+      cancelId: 1,
+      title: '업데이트 준비 완료',
+      message: `새 버전 ${info?.version || ''} 다운로드가 완료되었습니다.`,
+      detail: '재시작하면 업데이트가 적용됩니다.',
+    });
+
+    if (result.response === 0) {
+      autoUpdater.quitAndInstall();
+    }
+  });
+
+  autoUpdater.checkForUpdates().catch((error) => {
+    console.error('[auto-updater] initial check failed', error?.message || error);
+  });
+
+  updateCheckTimer = setInterval(() => {
+    autoUpdater.checkForUpdates().catch((error) => {
+      console.error('[auto-updater] periodic check failed', error?.message || error);
+    });
+  }, 1000 * 60 * 60 * 4);
+}
+
 app.on('second-instance', () => {
   if (!mainWindow) {
     return;
@@ -2446,6 +2517,7 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   ensureDatabase();
   await createWindow();
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2455,6 +2527,10 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  if (updateCheckTimer) {
+    clearInterval(updateCheckTimer);
+    updateCheckTimer = null;
+  }
   if (process.platform !== 'darwin') {
     app.quit();
   }

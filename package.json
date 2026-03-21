@@ -1,6 +1,6 @@
 {
   "name": "edufixer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "main": "electron/main.cjs",
   "type": "module",
@@ -12,6 +12,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "dist:win": "npm run build && electron-builder --win nsis",
+    "dist:win:publish": "npm run build && electron-builder --win nsis --publish always",
     "lint": "eslint .",
     "test": "vitest"
   },
@@ -25,10 +26,21 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "scripts/**/*",
       "tools/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "scripts",
+        "to": "scripts",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         "nsis"
       ]
@@ -36,6 +48,12 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "rio7710",
+      "repo": "eduPlan",
+      "releaseType": "release"
     }
   },
   "dependencies": {
@@ -52,6 +70,7 @@
     "@uiw/react-codemirror": "^4.25.8",
     "dompurify": "^3.3.3",
     "marked": "^17.0.4",
+    "electron-updater": "^6.6.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.0",
     "tiptap-markdown": "^0.9.0",
