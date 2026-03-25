@@ -1,6 +1,6 @@
 {
   "name": "edufixer",
-  "version": "0.1.2",
+  "version": "0.1.2-b",
   "private": true,
   "main": "electron/main.cjs",
   "type": "module",
