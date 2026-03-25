@@ -378,24 +378,28 @@ function CodeEditorComponent({
 
 export const CodeEditor = memo(
   CodeEditorComponent,
-  (prev, next) =>
-    prev.mode === next.mode
-    && prev.value === next.value
-    && prev.documentPath === next.documentPath
-    && prev.documentName === next.documentName
-    && prev.themeMode === next.themeMode
-    && prev.autoWrap === next.autoWrap
-    && prev.active === next.active
-    && prev.syncScrollRatio === next.syncScrollRatio
-    && prev.scrollRequest?.token === next.scrollRequest?.token
-    && prev.scrollRequest?.line === next.scrollRequest?.line
-    && prev.scrollRequest?.target === next.scrollRequest?.target
-    && prev.scrollRequest?.startColumn === next.scrollRequest?.startColumn
-    && prev.scrollRequest?.endColumn === next.scrollRequest?.endColumn
-    && prev.selectionRequest?.token === next.selectionRequest?.token
-    && prev.selectionRequest?.line === next.selectionRequest?.line
-    && prev.collapsedHeadingLines.length === next.collapsedHeadingLines.length
-    && prev.collapsedHeadingLines.every((line, index) => line === next.collapsedHeadingLines[index]),
+  (prev, next) => {
+    const prevCollapsedHeadingLines = prev.collapsedHeadingLines ?? [];
+    const nextCollapsedHeadingLines = next.collapsedHeadingLines ?? [];
+
+    return prev.mode === next.mode
+      && prev.value === next.value
+      && prev.documentPath === next.documentPath
+      && prev.documentName === next.documentName
+      && prev.themeMode === next.themeMode
+      && prev.autoWrap === next.autoWrap
+      && prev.active === next.active
+      && prev.syncScrollRatio === next.syncScrollRatio
+      && prev.scrollRequest?.token === next.scrollRequest?.token
+      && prev.scrollRequest?.line === next.scrollRequest?.line
+      && prev.scrollRequest?.target === next.scrollRequest?.target
+      && prev.scrollRequest?.startColumn === next.scrollRequest?.startColumn
+      && prev.scrollRequest?.endColumn === next.scrollRequest?.endColumn
+      && prev.selectionRequest?.token === next.selectionRequest?.token
+      && prev.selectionRequest?.line === next.selectionRequest?.line
+      && prevCollapsedHeadingLines.length === nextCollapsedHeadingLines.length
+      && prevCollapsedHeadingLines.every((line, index) => line === nextCollapsedHeadingLines[index]);
+  },
 );
 
 function buildJsMonitorPayload({

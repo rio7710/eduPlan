@@ -73,6 +73,7 @@ type SplitEditorPaneProps = {
 type SplitRenderPaneProps = {
   content: string;
   autoWrap: boolean;
+  selectionMode: PreviewSelectionMode;
   scrollRequest: Props['scrollRequest'];
   onPreviewActiveLineChange?: (line: number | null) => void;
   onPreviewLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
@@ -148,6 +149,7 @@ const SplitEditorPane = memo(function SplitEditorPane({
 const SplitRenderPane = memo(function SplitRenderPane({
   content,
   autoWrap,
+  selectionMode,
   scrollRequest,
   onPreviewActiveLineChange,
   onPreviewLocationTrigger,
@@ -165,6 +167,7 @@ const SplitRenderPane = memo(function SplitRenderPane({
       <ReactMarkdownPane
         markdownText={content}
         autoWrap={autoWrap}
+        selectionMode={selectionMode}
         scrollRequest={scrollRequest}
         onActiveLineChange={onPreviewActiveLineChange}
         onLocationTrigger={onPreviewLocationTrigger}
@@ -177,6 +180,7 @@ const SplitRenderPane = memo(function SplitRenderPane({
 }, (prev, next) =>
   prev.content === next.content
   && prev.autoWrap === next.autoWrap
+  && prev.selectionMode === next.selectionMode
   && prev.syncScrollRatio === next.syncScrollRatio
   && prev.scrollRequest?.token === next.scrollRequest?.token
   && prev.scrollRequest?.line === next.scrollRequest?.line
@@ -399,6 +403,7 @@ export function EditorView({
             <SplitRenderPane
               content={content}
               autoWrap={autoWrap}
+              selectionMode={previewSelectionMode}
               scrollRequest={splitPreviewScrollRequest}
               onPreviewActiveLineChange={onPreviewActiveLineChange}
               onPreviewLocationTrigger={onPreviewLocationTrigger}
