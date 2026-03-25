@@ -63,6 +63,7 @@ For all other cases, prefer partial updates.
 - Location change: update badges and breadcrumb only
 - Search jump: move selection and scroll target only
 - Selection change: update highlight only
+- Search result focus should update the exact match highlight when the text range is known.
 
 ## Render Pane Rules
 
@@ -86,6 +87,12 @@ For all other cases, prefer partial updates.
 - The follower pane may update scroll position, active line, or highlight to match the location basis.
 - The follower pane must not trigger full render work just because the active pane moved.
 - Split-mode synchronization should prefer location sync over full content sync.
+
+## File Session Rule
+
+- A document with no saved session should open in `render` mode.
+- A document with a saved session may restore the last mode and line for that file only.
+- Closing a tab should clear the saved session for that file.
 
 ## Implementation Direction
 

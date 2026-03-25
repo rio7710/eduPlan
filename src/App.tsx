@@ -35,6 +35,8 @@ export type { EditorMode };
 export type PreviewSelectionMode = 'block' | 'line' | 'text';
 const TRAINING_ACCESS_PASSWORD = 'jung25)(';
 const PREVIEW_SELECTION_MODE_STORAGE_KEY = 'eduplan-preview-selection-mode';
+const SEARCH_PANEL_SCOPE_STORAGE_KEY = 'edufixer-search-panel-scope';
+const EDITOR_SESSION_MAP_STORAGE_KEY = 'edufixer-editor-session-map';
 
 function isEditableMode(mode: EditorMode) {
   return mode === 'render' || mode === 'markdown' || mode === 'html' || mode === 'wysiwyg' || mode === 'split';
@@ -61,6 +63,19 @@ type SearchPanelState = {
   query: string;
   replaceValue: string;
   selectedIndex: number;
+};
+
+type SearchSelectionState = {
+  filePath?: string;
+  lineNumber: number;
+  start: number;
+  end: number;
+  query: string;
+};
+
+type StoredFileEditorSession = {
+  editorMode: EditorMode;
+  line: number;
 };
 
 type TabLocationSnapshot = {
@@ -105,14 +120,26 @@ export function App() {
   const [autoWrap, setAutoWrap] = useState<boolean>(() => window.localStorage.getItem('eduplan-auto-wrap') !== 'off');
   const [searchPanelState, setSearchPanelState] = useState<SearchPanelState>({
     mode: 'find',
-    scope: 'document',
+    scope: 'folder',
     query: '',
     replaceValue: '',
     selectedIndex: 0,
   });
+  const [searchSelection, setSearchSelection] = useState<SearchSelectionState | null>(null);
   const [mlDatasetStats, setMlDatasetStats] = useState<MlDatasetStats | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const resetEditorSyncForDocumentRef = useRef<(initialLine: number) => void>(() => {});
+  const setEditorModeForDocumentRef = useRef<(mode: EditorMode) => void>(() => {});
+  const editorSessionMapRef = useRef<Record<string, StoredFileEditorSession>>({});
+  const hadDocumentRef = useRef(false);
+  if (!Object.keys(editorSessionMapRef.current).length) {
+    try {
+      const raw = window.localStorage.getItem(EDITOR_SESSION_MAP_STORAGE_KEY);
+      editorSessionMapRef.current = raw ? JSON.parse(raw) as Record<string, StoredFileEditorSession> : {};
+    } catch {
+      editorSessionMapRef.current = {};
+    }
+  }
   function openView(view: ViewId, tabId: string = view) {
     if (view !== 'upload') clearUploadSelection();
     setActiveView(view);
@@ -120,7 +147,9 @@ export function App() {
   }
 
   function openShellDocumentState(doc: ShellDocument, options?: { initialLine?: number }) {
-    const initialLine = normalizeSessionLine(options?.initialLine ?? 1);
+    const savedSession = doc.filePath ? editorSessionMapRef.current[doc.filePath] : null;
+    const initialLine = normalizeSessionLine(options?.initialLine ?? savedSession?.line ?? 1);
+    setEditorModeForDocumentRef.current(savedSession?.editorMode ?? 'render');
     resetEditorSyncForDocumentRef.current(initialLine);
   }
 
@@ -169,6 +198,15 @@ export function App() {
       mergeSavedReviewItemsRef.current(saved.reviewItems);
       await refreshMlDatasetStats();
       setToastMessage(toastMessage);
+    },
+    onCloseDocument: (doc) => {
+      if (!doc.filePath) {
+        return;
+      }
+      const nextSessions = { ...editorSessionMapRef.current };
+      delete nextSessions[doc.filePath];
+      editorSessionMapRef.current = nextSessions;
+      window.localStorage.setItem(EDITOR_SESSION_MAP_STORAGE_KEY, JSON.stringify(nextSessions));
     },
   });
   const {
@@ -247,6 +285,53 @@ export function App() {
   useEffect(() => {
     resetEditorSyncForDocumentRef.current = resetForOpenedDocument;
   }, [resetForOpenedDocument]);
+
+  useEffect(() => {
+    setEditorModeForDocumentRef.current = setEditorMode;
+  }, [setEditorMode]);
+
+  useEffect(() => {
+    const hasDocument = Boolean(currentDocument);
+    const savedScope = window.localStorage.getItem(SEARCH_PANEL_SCOPE_STORAGE_KEY);
+    const resolvedSavedScope = savedScope === 'folder' || savedScope === 'document' ? savedScope : 'document';
+
+    if (!hasDocument && hadDocumentRef.current) {
+      setSearchPanelState((current) => patchIfChanged(current, 'scope', 'folder'));
+    }
+
+    if (hasDocument && !hadDocumentRef.current) {
+      setSearchPanelState((current) => patchIfChanged(current, 'scope', resolvedSavedScope));
+    }
+
+    hadDocumentRef.current = hasDocument;
+  }, [currentDocument]);
+
+  useEffect(() => {
+    if (currentDocument) {
+      window.localStorage.setItem(SEARCH_PANEL_SCOPE_STORAGE_KEY, searchPanelState.scope);
+    }
+  }, [currentDocument, searchPanelState.scope]);
+
+  useEffect(() => {
+    if (!currentDocument?.filePath || !isEditableMode(editorMode)) {
+      return;
+    }
+
+    const sessionLine = normalizeSessionLine(
+      editorMode === 'render'
+        ? currentRenderLocationLine
+        : currentEditorLine,
+    );
+    const nextSessions = {
+      ...editorSessionMapRef.current,
+      [currentDocument.filePath]: {
+        editorMode,
+        line: sessionLine,
+      },
+    };
+    editorSessionMapRef.current = nextSessions;
+    window.localStorage.setItem(EDITOR_SESSION_MAP_STORAGE_KEY, JSON.stringify(nextSessions));
+  }, [currentDocument?.filePath, currentEditorLine, currentRenderLocationLine, editorMode]);
 
   const tabLocationSnapshotsRef = useRef<Record<string, TabLocationSnapshot>>({});
   const previousActiveTabRef = useRef(activeTab);
@@ -583,7 +668,7 @@ export function App() {
               document={currentDocument}
               folderPath={activeSearchFolderPath}
               activeLine={null}
-              searchSelection={null}
+              searchSelection={searchSelection}
               mode={searchPanelState.mode}
               scope={searchPanelState.scope}
               query={searchPanelState.query}
@@ -591,11 +676,31 @@ export function App() {
               selectedIndex={searchPanelState.selectedIndex}
               onModeChange={(mode) => setSearchPanelState((current) => patchIfChanged(current, 'mode', mode))}
               onScopeChange={(scope) => setSearchPanelState((current) => patchIfChanged(current, 'scope', scope))}
-              onQueryChange={(query) => setSearchPanelState((current) => patchIfChanged(current, 'query', query))}
+              onQueryChange={(query) => {
+                setSearchSelection(null);
+                setSearchPanelState((current) => patchIfChanged(current, 'query', query));
+              }}
               onReplaceValueChange={(replaceValue) => setSearchPanelState((current) => patchIfChanged(current, 'replaceValue', replaceValue))}
               onSelectedIndexChange={(selectedIndex) => setSearchPanelState((current) => patchIfChanged(current, 'selectedIndex', selectedIndex))}
-              onSelectResult={(match) => jumpToSearchMatch(match)}
-              onSelectFolderResult={openFileAndJumpToSearchMatch}
+              onSelectResult={(match) => {
+                setSearchSelection({
+                  lineNumber: match.lineNumber,
+                  start: match.start,
+                  end: match.end,
+                  query: searchPanelState.query,
+                });
+                jumpToSearchMatch(match);
+              }}
+              onSelectFolderResult={(match) => {
+                setSearchSelection({
+                  filePath: match.filePath,
+                  lineNumber: match.lineNumber,
+                  start: match.start,
+                  end: match.end,
+                  query: searchPanelState.query,
+                });
+                void openFileAndJumpToSearchMatch(match);
+              }}
               onReplaceContent={handleContentChange}
               onApplyFolderReplace={applyUpdatedDocuments}
             />
@@ -663,7 +768,16 @@ export function App() {
                 selectionRequest={selectionRequest}
                 onSelectionRequestApplied={() => setSelectionRequest(null)}
                 selectedPreviewLine={selectedPreviewLine}
-                searchSelection={null}
+                searchSelection={
+                  searchSelection && (!searchSelection.filePath || searchSelection.filePath === currentDocument?.filePath)
+                    ? {
+                      lineNumber: searchSelection.lineNumber,
+                      start: searchSelection.start,
+                      end: searchSelection.end,
+                      query: searchSelection.query,
+                    }
+                    : null
+                }
                 collapsedHeadingLines={collapsedHeadingLines}
                 onToggleCollapsedHeading={(lineNumber) => {
                   setCollapsedHeadingLines((current) => current.filter((value) => value !== lineNumber));

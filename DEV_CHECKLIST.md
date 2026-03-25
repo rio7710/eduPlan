@@ -39,9 +39,14 @@ npm run test
 
 - Prefer small fixes over broad refactors.
 - Do not mix structural refactor and feature work in one pass.
+- Avoid growing files much past 200 lines unless a narrow fix in an existing large file is safer.
+- Split selection, clipboard, render, and sync logic into separate files or helpers instead of stacking them into one component.
 - Do not edit moved reference files in `_temp`.
 - Keep Electron, Python runner, and editor-sync boundaries stable unless fixing a concrete bug.
 - Follow `docs/render-policy.md` when touching preview, menu, location, or editor sync behavior.
+- New files should open in `render` mode first.
+- Existing files may restore last per-file mode and line, but closing a tab should reset that file session.
+- Search result clicks should move to the target line and visibly highlight the matched text in both render and edit views.
 
 ## Release Policy
 

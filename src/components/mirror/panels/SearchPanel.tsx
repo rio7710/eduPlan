@@ -118,22 +118,21 @@ export function SearchPanel({
       <div className="panel-header panel-header-row search-header-row">
         <span>검색</span>
         <div className="search-header-scope">
-          <span className="search-header-label">{scope === 'folder' ? '폴더 전체' : '현재 문서'}</span>
           <button
             type="button"
-            className={`search-scope-switch ${scope === 'folder' ? 'is-on' : 'is-off'}`}
-            role="switch"
-            aria-label="검색 범위 전환"
-            aria-checked={scope === 'folder'}
-            onClick={() => {
-              if (scope === 'folder') {
-                onScopeChange('document');
-                return;
-              }
-              onScopeChange(hasDocument ? 'document' : 'folder');
-            }}
+            className={`search-scope-chip ${scope === 'document' ? 'active' : ''}`}
+            disabled={!hasDocument}
+            onClick={() => onScopeChange('document')}
           >
-            <span className="search-scope-switch-thumb" aria-hidden="true" />
+            현재 문서
+          </button>
+          <button
+            type="button"
+            className={`search-scope-chip ${scope === 'folder' ? 'active' : ''}`}
+            disabled={!hasFolder}
+            onClick={() => onScopeChange('folder')}
+          >
+            폴더 전체
           </button>
         </div>
       </div>
@@ -219,7 +218,7 @@ export function SearchPanel({
 
         <div className="search-results">
           {scope === 'folder' ? (
-            folderHint ? (
+            folderHint && query.trim() ? (
               <div className="search-hint">{folderHint}</div>
             ) : (
               folderMatches.map((match, index) => (
@@ -242,7 +241,7 @@ export function SearchPanel({
                 </button>
               ))
             )
-          ) : documentHint ? (
+          ) : documentHint && query.trim() ? (
             <div className="search-hint">{documentHint}</div>
           ) : (
             documentMatches.map((match, index) => (

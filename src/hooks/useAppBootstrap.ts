@@ -2,7 +2,6 @@ import { useEffect, useEffectEvent } from 'react';
 import type { EditorMode } from '@/hooks/useEditorSync.types';
 
 type StoredEditorSession = {
-  filePath: string;
   line: number | null;
   editorMode: EditorMode;
 };
@@ -28,7 +27,8 @@ type UseAppBootstrapParams = {
 };
 
 const PREVIEW_SELECTION_MODE_STORAGE_KEY = 'eduplan-preview-selection-mode';
-const LAST_EDITOR_SESSION_STORAGE_KEY = 'eduplan-last-editor-session';
+const LAST_ACTIVE_EDITOR_FILE_STORAGE_KEY = 'edufixer-last-active-editor-file';
+const EDITOR_SESSION_MAP_STORAGE_KEY = 'edufixer-editor-session-map';
 
 export function useAppBootstrap({
   autoWrap,
@@ -61,13 +61,7 @@ export function useAppBootstrap({
     if (!currentDocumentFilePath || !isEditableMode(editorMode)) {
       return;
     }
-
-    const payload: StoredEditorSession = {
-      filePath: currentDocumentFilePath,
-      line: normalizeSessionLine(currentEditorLine),
-      editorMode,
-    };
-    window.localStorage.setItem(LAST_EDITOR_SESSION_STORAGE_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(LAST_ACTIVE_EDITOR_FILE_STORAGE_KEY, currentDocumentFilePath);
   }, [currentDocumentFilePath, currentEditorLine, editorMode, isEditableMode, normalizeSessionLine]);
 
   const runRefreshEvent = useEffectEvent((includeSubfolders?: boolean) => {
@@ -96,23 +90,25 @@ export function useAppBootstrap({
     }
     hydrateRecentDocuments(shellState.recentDocuments);
 
-    const raw = window.localStorage.getItem(LAST_EDITOR_SESSION_STORAGE_KEY);
-    if (!raw) {
+    const lastActiveFilePath = window.localStorage.getItem(LAST_ACTIVE_EDITOR_FILE_STORAGE_KEY);
+    if (!lastActiveFilePath) {
       return;
     }
 
-    let session: StoredEditorSession | null = null;
+    let sessionMap: Record<string, StoredEditorSession> | null = null;
     try {
-      session = JSON.parse(raw) as StoredEditorSession;
+      const rawMap = window.localStorage.getItem(EDITOR_SESSION_MAP_STORAGE_KEY);
+      sessionMap = rawMap ? JSON.parse(rawMap) as Record<string, StoredEditorSession> : null;
     } catch {
-      session = null;
+      sessionMap = null;
     }
 
-    if (!session?.filePath) {
+    const session = sessionMap?.[lastActiveFilePath] ?? null;
+    if (!session) {
       return;
     }
 
-    const reopened = await window.eduFixerApi?.openRecent(session.filePath);
+    const reopened = await window.eduFixerApi?.openRecent(lastActiveFilePath);
     if (disposedRef.current || !reopened) {
       return;
     }

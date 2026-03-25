@@ -8,12 +8,14 @@ type NavigateToLineOptions = {
   endColumn?: number;
   previewLabel?: string;
   selectPreviewLine?: boolean;
+  forceRenderScroll?: boolean;
 };
 
 type ExplicitLocationSyncOptions = {
   lineNumber: number;
   startColumn?: number;
   endColumn?: number;
+  forceRenderScroll?: boolean;
 };
 
 type UseAppCommandsParams = {
@@ -137,6 +139,7 @@ export function useAppCommands({
     lineNumber,
     startColumn,
     endColumn,
+    forceRenderScroll = false,
   }: ExplicitLocationSyncOptions) {
     setCurrentEditorLine((current) => nextIfChanged(current, lineNumber));
     setCurrentPreviewLine((current) => nextIfChanged(current, lineNumber));
@@ -161,7 +164,7 @@ export function useAppCommands({
 
     // Navigation-only changes in render mode should not force render-pane scrolling.
     // Keep render content stable until the user actually interacts with the render surface.
-    if (editorMode === 'render') {
+    if (editorMode === 'render' && !forceRenderScroll) {
       return;
     }
 
@@ -170,7 +173,7 @@ export function useAppCommands({
       startColumn,
       endColumn,
       token: Date.now(),
-      target: locationSurface === 'Render' ? 'Render' : 'Edit',
+      target: editorMode === 'render' ? 'Render' : locationSurface === 'Render' ? 'Render' : 'Edit',
     });
   }
 
@@ -192,6 +195,7 @@ export function useAppCommands({
       lineNumber,
       startColumn: options?.startColumn,
       endColumn: options?.endColumn,
+      forceRenderScroll: options?.forceRenderScroll,
     });
   }
 
@@ -201,6 +205,7 @@ export function useAppCommands({
       endColumn: match.end,
       previewLabel: `${match.lineNumber}행 검색 결과`,
       selectPreviewLine: false,
+      forceRenderScroll: true,
     });
   }
 
@@ -220,6 +225,7 @@ export function useAppCommands({
         endColumn: match.end,
         previewLabel: `${match.lineNumber}행 검색 결과`,
         selectPreviewLine: false,
+        forceRenderScroll: true,
       });
     }, 0);
   }

@@ -1,11 +1,12 @@
 import CodeMirror from '@uiw/react-codemirror';
+import { RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
 import { html as htmlLang } from '@codemirror/lang-html';
 import { foldEffect, foldedRanges, unfoldEffect } from '@codemirror/language';
 import { redo, undo } from '@codemirror/commands';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { memo, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { EditorView } from '@codemirror/view';
+import { Decoration, EditorView } from '@codemirror/view';
 import { getHeadingSections } from '@/lib/headingSections';
 
 interface CodeEditorProps {
@@ -18,6 +19,7 @@ interface CodeEditorProps {
   active?: boolean;
   scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'Render' | 'Both' } | null;
   selectionRequest?: { line: number; token: number } | null;
+  searchSelection?: { lineNumber: number; start: number; end: number; query: string } | null;
   collapsedHeadingLines?: number[];
   onActiveLineChange?: (line: number | null) => void;
   onEditorInteraction?: () => void;
@@ -39,6 +41,7 @@ function CodeEditorComponent({
   active = true,
   scrollRequest = null,
   selectionRequest = null,
+  searchSelection = null,
   collapsedHeadingLines = [],
   onActiveLineChange,
   onEditorInteraction,
@@ -49,6 +52,45 @@ function CodeEditorComponent({
   onLocationTrigger,
   onChange,
 }: CodeEditorProps) {
+  const searchHighlightMark = useMemo(() => Decoration.mark({ class: 'cm-search-hit' }), []);
+  const clearSearchHighlightEffect = useMemo(
+    () => StateEffect.define<null>(),
+    [],
+  );
+  const setSearchHighlightEffect = useMemo(
+    () => StateEffect.define<{ from: number; to: number }[]>({
+      map: (value, change) => value.map((range) => ({
+        from: change.mapPos(range.from),
+        to: change.mapPos(range.to),
+      })),
+    }),
+    [],
+  );
+  const searchHighlightField = useMemo(() => StateField.define({
+    create() {
+      return Decoration.none;
+    },
+    update(decorations, transaction) {
+      let nextDecorations = decorations.map(transaction.changes);
+      for (const effect of transaction.effects) {
+        if (effect.is(clearSearchHighlightEffect)) {
+          nextDecorations = Decoration.none;
+          continue;
+        }
+        if (effect.is(setSearchHighlightEffect)) {
+          const builder = new RangeSetBuilder<Decoration>();
+          effect.value.forEach((range) => {
+            if (range.to > range.from) {
+              builder.add(range.from, range.to, searchHighlightMark);
+            }
+          });
+          nextDecorations = builder.finish();
+        }
+      }
+      return nextDecorations;
+    },
+    provide: (field) => EditorView.decorations.from(field),
+  }), [clearSearchHighlightEffect, searchHighlightMark, setSearchHighlightEffect]);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const lastReportedLineRef = useRef<number | null>(null);
   const lastLoggedAtRef = useRef(0);
@@ -139,8 +181,9 @@ function CodeEditorComponent({
       mode === 'markdown' ? markdown() : htmlLang(),
       ...(autoWrap ? [EditorView.lineWrapping] : []),
       lineChangeListener,
+      searchHighlightField,
     ];
-  }, [autoWrap, lineChangeListener, mode]);
+  }, [autoWrap, lineChangeListener, mode, searchHighlightField]);
 
   const basicSetup = useMemo(() => ({
     lineNumbers: true,
@@ -330,6 +373,24 @@ function CodeEditorComponent({
   }, [editorView, onSelectionRequestApplied, reportActiveLine, selectionRequest]);
 
   useEffect(() => {
+    if (!editorView) {
+      return;
+    }
+
+    if (!searchSelection?.query.trim()) {
+      editorView.dispatch({ effects: clearSearchHighlightEffect.of(null) });
+      return;
+    }
+
+    const line = editorView.state.doc.line(Math.min(searchSelection.lineNumber, editorView.state.doc.lines));
+    const from = Math.min(line.from + searchSelection.start, line.to);
+    const to = Math.min(line.from + searchSelection.end, line.to);
+    editorView.dispatch({
+      effects: setSearchHighlightEffect.of([{ from, to }]),
+    });
+  }, [clearSearchHighlightEffect, editorView, searchSelection, setSearchHighlightEffect]);
+
+  useEffect(() => {
     if (!editorView || mode !== 'markdown') {
       return;
     }
@@ -397,6 +458,10 @@ export const CodeEditor = memo(
       && prev.scrollRequest?.endColumn === next.scrollRequest?.endColumn
       && prev.selectionRequest?.token === next.selectionRequest?.token
       && prev.selectionRequest?.line === next.selectionRequest?.line
+      && prev.searchSelection?.lineNumber === next.searchSelection?.lineNumber
+      && prev.searchSelection?.start === next.searchSelection?.start
+      && prev.searchSelection?.end === next.searchSelection?.end
+      && prev.searchSelection?.query === next.searchSelection?.query
       && prevCollapsedHeadingLines.length === nextCollapsedHeadingLines.length
       && prevCollapsedHeadingLines.every((line, index) => line === nextCollapsedHeadingLines[index]);
   },

@@ -1,12 +1,67 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { memo, useEffect, useMemo, useRef, useState, type ClipboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import type { PreviewSelectionMode } from '@/App';
+import { PreviewMarkdownContent } from '@/components/preview/PreviewMarkdownContent';
+import { PreviewContextMenu } from '@/components/preview/PreviewContextMenu';
+import { buildPreviewClipboardPayload } from '@/utils/previewClipboard';
+import { writePreviewClipboard } from '@/utils/previewClipboardWrite';
+
+const PREVIEW_CONTEXT_MENU_OPTIONS_STORAGE_KEY = 'edufixer-preview-context-menu-options';
+
+function unwrapPreviewSearchMarks(container: HTMLElement) {
+  const marks = Array.from(container.querySelectorAll<HTMLElement>('.preview-search-match'));
+  marks.forEach((mark) => {
+    const parent = mark.parentNode;
+    if (!parent) {
+      return;
+    }
+    while (mark.firstChild) {
+      parent.insertBefore(mark.firstChild, mark);
+    }
+    parent.removeChild(mark);
+  });
+}
+
+function highlightPreviewSearchText(target: HTMLElement, query: string) {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return false;
+  }
+
+  const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  let currentNode = walker.nextNode();
+  while (currentNode) {
+    if (currentNode.nodeType === Node.TEXT_NODE && currentNode.textContent?.trim()) {
+      textNodes.push(currentNode as Text);
+    }
+    currentNode = walker.nextNode();
+  }
+
+  for (const textNode of textNodes) {
+    const text = textNode.textContent ?? '';
+    const matchIndex = text.toLowerCase().indexOf(trimmedQuery.toLowerCase());
+    if (matchIndex < 0) {
+      continue;
+    }
+
+    const range = document.createRange();
+    range.setStart(textNode, matchIndex);
+    range.setEnd(textNode, matchIndex + trimmedQuery.length);
+
+    const mark = document.createElement('span');
+    mark.className = 'preview-search-match';
+    range.surroundContents(mark);
+    return true;
+  }
+
+  return false;
+}
 
 type ReactMarkdownPaneProps = {
   markdownText: string;
   autoWrap?: boolean;
   selectionMode?: PreviewSelectionMode;
+  searchSelection?: { lineNumber: number; start: number; end: number; query: string } | null;
   scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'Render' | 'Both' } | null;
   onActiveLineChange?: (line: number | null) => void;
   onMouseFocus?: () => void;
@@ -19,6 +74,7 @@ function ReactMarkdownPaneComponent({
   markdownText,
   autoWrap = true,
   selectionMode = 'text',
+  searchSelection = null,
   scrollRequest = null,
   onActiveLineChange,
   onMouseFocus,
@@ -31,6 +87,32 @@ function ReactMarkdownPaneComponent({
   const lastEmittedScrollRatioRef = useRef(-1);
   const pendingScrollRatioRef = useRef<number | null>(null);
   const scrollEmitRafRef = useRef<number | null>(null);
+  const autoCopyToastTimerRef = useRef<number | null>(null);
+  const autoCopyScheduleRef = useRef<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [autoCopyEnabled, setAutoCopyEnabled] = useState(() => {
+    const raw = window.localStorage.getItem(PREVIEW_CONTEXT_MENU_OPTIONS_STORAGE_KEY);
+    if (!raw) {
+      return false;
+    }
+    try {
+      return JSON.parse(raw).autoCopyEnabled === true;
+    } catch {
+      return false;
+    }
+  });
+  const [stripNumbersEnabled, setStripNumbersEnabled] = useState(() => {
+    const raw = window.localStorage.getItem(PREVIEW_CONTEXT_MENU_OPTIONS_STORAGE_KEY);
+    if (!raw) {
+      return false;
+    }
+    try {
+      return JSON.parse(raw).stripNumbersEnabled === true;
+    } catch {
+      return false;
+    }
+  });
+  const [autoCopyToastVisible, setAutoCopyToastVisible] = useState(false);
   const headingLines = useMemo(() => {
     return markdownText
       .split(/\r?\n/)
@@ -62,6 +144,37 @@ function ReactMarkdownPaneComponent({
     const target = containerRef.current.querySelector<HTMLElement>(`[data-render-line="${targetHeading.lineNumber}"]`);
     target?.scrollIntoView({ block: 'start', behavior: 'auto' });
   }, [headingLines, scrollRequest]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    unwrapPreviewSearchMarks(container);
+
+    if (!searchSelection?.query.trim()) {
+      return;
+    }
+
+    const exactTarget = container.querySelector<HTMLElement>(`.preview-line-target[data-render-line="${searchSelection.lineNumber}"]`);
+    const fallbackTarget = Array.from(container.querySelectorAll<HTMLElement>('.preview-line-target'))
+      .find((element) => element.textContent?.includes(searchSelection.query));
+    const target = exactTarget ?? fallbackTarget ?? null;
+    if (!target) {
+      return;
+    }
+
+    const highlighted = highlightPreviewSearchText(target, searchSelection.query);
+    if (!highlighted) {
+      target.classList.add('is-search-target');
+    }
+
+    return () => {
+      unwrapPreviewSearchMarks(container);
+      target.classList.remove('is-search-target');
+    };
+  }, [searchSelection]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -151,6 +264,104 @@ function ReactMarkdownPaneComponent({
     return () => window.clearTimeout(timer);
   }, [syncScrollRatio]);
 
+  useEffect(() => {
+    return () => {
+      if (autoCopyToastTimerRef.current !== null) {
+        window.clearTimeout(autoCopyToastTimerRef.current);
+      }
+      if (autoCopyScheduleRef.current !== null) {
+        window.clearTimeout(autoCopyScheduleRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      PREVIEW_CONTEXT_MENU_OPTIONS_STORAGE_KEY,
+      JSON.stringify({
+        autoCopyEnabled,
+        stripNumbersEnabled,
+      }),
+    );
+  }, [autoCopyEnabled, stripNumbersEnabled]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    const closeMenu = () => setContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener('mousedown', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  function showAutoCopyToast() {
+    if (autoCopyToastTimerRef.current !== null) {
+      window.clearTimeout(autoCopyToastTimerRef.current);
+    }
+    setAutoCopyToastVisible(true);
+    autoCopyToastTimerRef.current = window.setTimeout(() => {
+      setAutoCopyToastVisible(false);
+      autoCopyToastTimerRef.current = null;
+    }, 1400);
+  }
+
+  function logClipboardPayload(payload: { plain: string; html?: string }, source: 'auto' | 'manual') {
+    console.log('[preview-copy]', {
+      source,
+      plain: payload.plain,
+      html: payload.html ?? null,
+      plainLength: payload.plain.length,
+      htmlLength: payload.html?.length ?? 0,
+      hasTableHtml: payload.html?.includes('<table') ?? false,
+    });
+  }
+
+  function selectionBelongsToPreview(selection: Selection): boolean {
+    const container = containerRef.current;
+    if (!container || !selection.rangeCount) {
+      return false;
+    }
+
+    const range = selection.getRangeAt(0);
+    const startNode = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+    const endNode = range.endContainer instanceof Element ? range.endContainer : range.endContainer.parentElement;
+    return Boolean(startNode && endNode && container.contains(startNode) && container.contains(endNode));
+  }
+
+  async function copyCurrentSelection(showToast = false) {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selectionBelongsToPreview(selection)) {
+      return false;
+    }
+
+    const payload = buildPreviewClipboardPayload(selection, {
+      stripNumbers: stripNumbersEnabled,
+    });
+    if (!payload) {
+      return false;
+    }
+
+    logClipboardPayload(payload, 'auto');
+    const copied = await writePreviewClipboard(payload);
+    if (copied && showToast) {
+      showAutoCopyToast();
+    }
+    return copied;
+  }
+
   function expandSelectionToLineTargets() {
     if (selectionMode !== 'line') {
       return;
@@ -222,58 +433,87 @@ function ReactMarkdownPaneComponent({
     expandedRange.setEndAfter(lastTarget);
     selection.removeAllRanges();
     selection.addRange(expandedRange);
+
+  }
+
+  function handleCopy(event: ClipboardEvent<HTMLDivElement>) {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      return;
+    }
+
+    const payload = buildPreviewClipboardPayload(selection, {
+      stripNumbers: stripNumbersEnabled,
+    });
+    if (!payload) {
+      return;
+    }
+
+    logClipboardPayload(payload, 'manual');
+    event.preventDefault();
+    event.clipboardData?.setData('text/plain', payload.plain);
+    if (payload.html) {
+      event.clipboardData?.setData('text/html', payload.html);
+    }
+    void writePreviewClipboard(payload);
+  }
+
+  function handleContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    onMouseFocus?.();
+    setContextMenu({ x: event.clientX, y: event.clientY });
+  }
+
+  function handleMouseUp() {
+    expandSelectionToLineTargets();
+    if (!autoCopyEnabled) {
+      return;
+    }
+    if (autoCopyScheduleRef.current !== null) {
+      window.clearTimeout(autoCopyScheduleRef.current);
+    }
+    autoCopyScheduleRef.current = window.setTimeout(() => {
+      autoCopyScheduleRef.current = null;
+      void copyCurrentSelection(true);
+    }, 32);
   }
 
   return (
-    <div
-      ref={containerRef}
-      className={`preview-pane react-markdown-pane ${selectionMode === 'line' ? 'preview-pane-line-mode' : ''} ${autoWrap ? '' : 'preview-pane-nowrap'}`.trim()}
-      style={{ userSelect: 'text' }}
-      onMouseDown={onMouseFocus}
-      onWheel={onMouseFocus}
-      onMouseUp={expandSelectionToLineTargets}
-    >
-      {markdownText.trim() ? (
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            h1: ({ node, ...props }) => {
-              const line = headingLines.find((item) => item.level === 1 && item.text === String(props.children ?? '').trim())?.lineNumber;
-              return <h1 className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={line ?? undefined} {...props} />;
-            },
-            h2: ({ node, ...props }) => {
-              const line = headingLines.find((item) => item.level === 2 && item.text === String(props.children ?? '').trim())?.lineNumber;
-              return <h2 className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={line ?? undefined} {...props} />;
-            },
-            h3: ({ node, ...props }) => {
-              const line = headingLines.find((item) => item.level === 3 && item.text === String(props.children ?? '').trim())?.lineNumber;
-              return <h3 className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={line ?? undefined} {...props} />;
-            },
-            h4: ({ node, ...props }) => {
-              const line = headingLines.find((item) => item.level === 4 && item.text === String(props.children ?? '').trim())?.lineNumber;
-              return <h4 className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={line ?? undefined} {...props} />;
-            },
-            h5: ({ node, ...props }) => {
-              const line = headingLines.find((item) => item.level === 5 && item.text === String(props.children ?? '').trim())?.lineNumber;
-              return <h5 className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={line ?? undefined} {...props} />;
-            },
-            h6: ({ node, ...props }) => {
-              const line = headingLines.find((item) => item.level === 6 && item.text === String(props.children ?? '').trim())?.lineNumber;
-              return <h6 className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={line ?? undefined} {...props} />;
-            },
-            p: ({ node, ...props }) => <p className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" {...props} />,
-            li: ({ node, ...props }) => <li className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" {...props} />,
-            blockquote: ({ node, ...props }) => <blockquote className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" {...props} />,
-            table: ({ node, ...props }) => <table data-preview-select-root="true" data-preview-table-root="true" {...props} />,
-            tr: ({ node, ...props }) => <tr className="preview-line-target" data-preview-line-target="true" data-preview-table-row="true" {...props} />,
+    <>
+      <div
+        ref={containerRef}
+        className={`preview-pane react-markdown-pane ${selectionMode === 'line' ? 'preview-pane-line-mode' : ''} ${autoWrap ? '' : 'preview-pane-nowrap'}`.trim()}
+        style={{ userSelect: 'text' }}
+        onMouseDown={onMouseFocus}
+        onWheel={onMouseFocus}
+        onMouseUp={handleMouseUp}
+        onCopy={handleCopy}
+        onContextMenu={handleContextMenu}
+      >
+        {markdownText.trim() ? (
+          <PreviewMarkdownContent markdownText={markdownText} headingLines={headingLines} />
+        ) : (
+          <div className="empty-stage">미리볼 내용이 없습니다.</div>
+        )}
+      </div>
+      {contextMenu ? (
+        <PreviewContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          autoCopy={autoCopyEnabled}
+          stripNumbers={stripNumbersEnabled}
+          onCopy={() => {
+            void copyCurrentSelection();
+            setContextMenu(null);
           }}
-        >
-          {markdownText}
-        </ReactMarkdown>
-      ) : (
-        <div className="empty-stage">미리볼 내용이 없습니다.</div>
-      )}
-    </div>
+          onToggleAutoCopy={() => setAutoCopyEnabled((value) => !value)}
+          onToggleStripNumbers={() => setStripNumbersEnabled((value) => !value)}
+        />
+      ) : null}
+      <div className={`preview-copy-toast ${autoCopyToastVisible ? 'visible' : ''}`} role="status" aria-live="polite">
+        클립보드에 저장되었습니다.
+      </div>
+    </>
   );
 }
 
@@ -283,6 +523,10 @@ export const ReactMarkdownPane = memo(
     prev.markdownText === next.markdownText
     && prev.autoWrap === next.autoWrap
     && prev.selectionMode === next.selectionMode
+    && prev.searchSelection?.lineNumber === next.searchSelection?.lineNumber
+    && prev.searchSelection?.start === next.searchSelection?.start
+    && prev.searchSelection?.end === next.searchSelection?.end
+    && prev.searchSelection?.query === next.searchSelection?.query
     && prev.syncScrollRatio === next.syncScrollRatio
     && prev.scrollRequest?.token === next.scrollRequest?.token
     && prev.scrollRequest?.line === next.scrollRequest?.line

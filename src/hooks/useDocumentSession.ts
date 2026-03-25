@@ -9,6 +9,7 @@ type UseDocumentSessionOptions = {
   onActivateDocument: (doc: ShellDocument, options?: { initialLine?: number }) => void;
   onSelectUpload: (selection: UploadSelection) => void;
   onAfterSave: (saved: SaveDocumentResult, toastMessage: string) => Promise<void> | void;
+  onCloseDocument?: (doc: ShellDocument) => void;
 };
 
 export function useDocumentSession({
@@ -16,6 +17,7 @@ export function useDocumentSession({
   onActivateDocument,
   onSelectUpload,
   onAfterSave,
+  onCloseDocument,
 }: UseDocumentSessionOptions) {
   const [activeTab, setActiveTab] = useState('welcome');
   const [recentDocuments, setRecentDocuments] = useState<ShellDocument[]>([]);
@@ -46,12 +48,24 @@ export function useDocumentSession({
       null;
 
     setCurrentDocument(nextDoc);
+    if (nextDoc) {
+      onActivateDocument(nextDoc);
+    }
     onOpenView('editor', tabId);
   }
 
   function handleCloseTab(tabId: string) {
     if (tabId === 'welcome') {
       return;
+    }
+
+    const closingDoc =
+      openDocuments[tabId] ??
+      recentDocuments.find((doc) => doc.id === tabId) ??
+      null;
+
+    if (closingDoc) {
+      onCloseDocument?.(closingDoc);
     }
 
     setTabs((current) => {
@@ -79,6 +93,9 @@ export function useDocumentSession({
               recentDocuments.find((doc) => doc.id === fallbackTab.id) ??
               null;
             setCurrentDocument(fallbackDoc);
+            if (fallbackDoc) {
+              onActivateDocument(fallbackDoc);
+            }
             onOpenView('editor', fallbackTab.id);
           }
         }

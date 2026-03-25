@@ -58,6 +58,7 @@ type SplitEditorPaneProps = {
   autoWrap: boolean;
   scrollRequest: Props['scrollRequest'];
   selectionRequest: Props['selectionRequest'];
+  searchSelection: Props['searchSelection'];
   onSelectionRequestApplied?: () => void;
   collapsedHeadingLines: number[];
   onEditorActiveLineChange?: (line: number | null) => void;
@@ -74,6 +75,7 @@ type SplitRenderPaneProps = {
   content: string;
   autoWrap: boolean;
   selectionMode: PreviewSelectionMode;
+  searchSelection: Props['searchSelection'];
   scrollRequest: Props['scrollRequest'];
   onPreviewActiveLineChange?: (line: number | null) => void;
   onPreviewLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
@@ -91,6 +93,7 @@ const SplitEditorPane = memo(function SplitEditorPane({
   autoWrap,
   scrollRequest,
   selectionRequest,
+  searchSelection,
   onSelectionRequestApplied,
   collapsedHeadingLines,
   onEditorActiveLineChange,
@@ -118,6 +121,7 @@ const SplitEditorPane = memo(function SplitEditorPane({
         active
         scrollRequest={scrollRequest}
         selectionRequest={selectionRequest}
+        searchSelection={searchSelection}
         onSelectionRequestApplied={onSelectionRequestApplied}
         collapsedHeadingLines={collapsedHeadingLines}
         onActiveLineChange={onEditorActiveLineChange}
@@ -142,6 +146,10 @@ const SplitEditorPane = memo(function SplitEditorPane({
   && prev.scrollRequest?.target === next.scrollRequest?.target
   && prev.selectionRequest?.token === next.selectionRequest?.token
   && prev.selectionRequest?.line === next.selectionRequest?.line
+  && prev.searchSelection?.lineNumber === next.searchSelection?.lineNumber
+  && prev.searchSelection?.start === next.searchSelection?.start
+  && prev.searchSelection?.end === next.searchSelection?.end
+  && prev.searchSelection?.query === next.searchSelection?.query
   && prev.collapsedHeadingLines.length === next.collapsedHeadingLines.length
   && prev.collapsedHeadingLines.every((line, index) => line === next.collapsedHeadingLines[index]),
 );
@@ -150,6 +158,7 @@ const SplitRenderPane = memo(function SplitRenderPane({
   content,
   autoWrap,
   selectionMode,
+  searchSelection,
   scrollRequest,
   onPreviewActiveLineChange,
   onPreviewLocationTrigger,
@@ -168,6 +177,7 @@ const SplitRenderPane = memo(function SplitRenderPane({
         markdownText={content}
         autoWrap={autoWrap}
         selectionMode={selectionMode}
+        searchSelection={searchSelection}
         scrollRequest={scrollRequest}
         onActiveLineChange={onPreviewActiveLineChange}
         onLocationTrigger={onPreviewLocationTrigger}
@@ -181,6 +191,10 @@ const SplitRenderPane = memo(function SplitRenderPane({
   prev.content === next.content
   && prev.autoWrap === next.autoWrap
   && prev.selectionMode === next.selectionMode
+  && prev.searchSelection?.lineNumber === next.searchSelection?.lineNumber
+  && prev.searchSelection?.start === next.searchSelection?.start
+  && prev.searchSelection?.end === next.searchSelection?.end
+  && prev.searchSelection?.query === next.searchSelection?.query
   && prev.syncScrollRatio === next.syncScrollRatio
   && prev.scrollRequest?.token === next.scrollRequest?.token
   && prev.scrollRequest?.line === next.scrollRequest?.line
@@ -338,7 +352,7 @@ export function EditorView({
           onMouseEnter={() => onLocationSurfaceChange?.('Edit')}
         >
           <div className="editor-mode-panel active">
-            <CodeEditor mode="markdown" value={content} documentPath={document?.filePath ?? null} documentName={document?.fileName ?? null} themeMode={theme} autoWrap={autoWrap} active scrollRequest={scrollRequest} selectionRequest={null} onSelectionRequestApplied={onSelectionRequestApplied} collapsedHeadingLines={collapsedHeadingLines} onActiveLineChange={onEditorActiveLineChange} onLocationTrigger={onEditorLocationTrigger} onEditorInteraction={onEditorInteraction} onChange={onChangeContent} />
+            <CodeEditor mode="markdown" value={content} documentPath={document?.filePath ?? null} documentName={document?.fileName ?? null} themeMode={theme} autoWrap={autoWrap} active scrollRequest={scrollRequest} selectionRequest={null} searchSelection={searchSelection} onSelectionRequestApplied={onSelectionRequestApplied} collapsedHeadingLines={collapsedHeadingLines} onActiveLineChange={onEditorActiveLineChange} onLocationTrigger={onEditorLocationTrigger} onEditorInteraction={onEditorInteraction} onChange={onChangeContent} />
           </div>
         </div>
       ) : null}
@@ -364,6 +378,7 @@ export function EditorView({
               markdownText={content}
               autoWrap={autoWrap}
               selectionMode={previewSelectionMode}
+              searchSelection={searchSelection}
               scrollRequest={scrollRequest}
               onActiveLineChange={onRenderActiveLineChange}
             />
@@ -381,6 +396,7 @@ export function EditorView({
               autoWrap={autoWrap}
               scrollRequest={splitEditorScrollRequest}
               selectionRequest={selectionRequest}
+              searchSelection={searchSelection}
               onSelectionRequestApplied={onSelectionRequestApplied}
               collapsedHeadingLines={collapsedHeadingLines}
               onEditorActiveLineChange={onEditorActiveLineChange}
@@ -404,6 +420,7 @@ export function EditorView({
               content={content}
               autoWrap={autoWrap}
               selectionMode={previewSelectionMode}
+              searchSelection={searchSelection}
               scrollRequest={splitPreviewScrollRequest}
               onPreviewActiveLineChange={onPreviewActiveLineChange}
               onPreviewLocationTrigger={onPreviewLocationTrigger}

@@ -9,6 +9,8 @@ Use `d:\OneDrive\Desktop\eduPlan\eduFixer` as the only project root.
 - Preserve existing Electron, IPC, Python runner, and editor-sync boundaries unless a bug requires changing them.
 - Do not move or rename files just to improve aesthetics.
 - Keep changes local to the module that owns the behavior.
+- Keep files small enough to reason about quickly. Avoid pushing a file much past 200 lines unless the existing file is already larger and a narrow fix is safer.
+- Split new logic by responsibility before a file becomes hard to scan. Selection rules, clipboard rules, render rules, and sync rules must not be merged into one large module.
 - Respect existing user edits. Never revert unrelated dirty files.
 
 ## Project Boundaries
@@ -24,6 +26,14 @@ Use `d:\OneDrive\Desktop\eduPlan\eduFixer` as the only project root.
 - Follow `docs/render-policy.md` for render and navigation behavior.
 - Full render is allowed only on initial load, refresh, document change, or content change.
 - Navigation-only updates must not trigger full render.
+- Search result clicks must move to the target line without forcing unrelated full render work.
+- Search highlighting should prefer exact text-range highlight over whole-block highlight when the target text is known.
+
+## File Session Rules
+
+- A file opened for the first time should start in `render` mode.
+- Reopening or reselecting an already-tracked file should restore that file's last editor mode and line.
+- Closing a document tab must clear that file's stored editor session so the next open starts fresh.
 
 ## Python Rules
 
@@ -43,6 +53,8 @@ Use `d:\OneDrive\Desktop\eduPlan\eduFixer` as the only project root.
 
 - Keep imports stable and avoid churn.
 - Keep functions and hooks in their current ownership area unless there is a concrete defect.
+- Prefer functions around 40 to 60 lines when practical.
+- If a change would add another large branch of logic to a file, extract it into a nearby helper, hook, or utility first.
 - Add comments only when the logic is non-obvious.
 - Use ASCII by default.
 
