@@ -1,0 +1,53 @@
+# EduFixer Working Guide
+
+Use `d:\OneDrive\Desktop\eduPlan\eduFixer` as the only project root.
+
+## Core Rules
+
+- Prefer targeted fixes over broad refactors.
+- Do not mix structure changes with feature changes in the same task unless the user explicitly asks for both.
+- Preserve existing Electron, IPC, Python runner, and editor-sync boundaries unless a bug requires changing them.
+- Do not move or rename files just to improve aesthetics.
+- Keep changes local to the module that owns the behavior.
+- Respect existing user edits. Never revert unrelated dirty files.
+
+## Project Boundaries
+
+- `src/`: React UI, hooks, store, and view logic.
+- `electron/handlers/`: IPC entry points and orchestration.
+- `electron/lib/`: shared runtime helpers, database utilities, and Python execution.
+- `scripts/`: Python helper scripts invoked by Electron.
+- `docs/`: project notes and internal references, not runtime code.
+
+## Render Policy
+
+- Follow `docs/render-policy.md` for render and navigation behavior.
+- Full render is allowed only on initial load, refresh, document change, or content change.
+- Navigation-only updates must not trigger full render.
+
+## Python Rules
+
+- Use `.\.venv\Scripts\python.exe` from this repo when running Python locally.
+- Install Python dependencies with `python -m pip install -r requirements.txt`.
+- Prefer `python -m pip` over bare `pip`.
+- Do not assume global Python or global packages are valid for this repo.
+
+## Formatting And Validation
+
+- Run `npm run lint` before large edits when possible.
+- Run `npm run typecheck` after TypeScript changes when possible.
+- Run `npm run format` only on files touched for the current task.
+- Treat existing lint debt as separate from the current task unless the user asks to clean it up.
+
+## Edit Style
+
+- Keep imports stable and avoid churn.
+- Keep functions and hooks in their current ownership area unless there is a concrete defect.
+- Add comments only when the logic is non-obvious.
+- Use ASCII by default.
+
+## Decision Policy
+
+- If a request suggests a broad refactor, stop and ask whether the user wants a narrow fix instead.
+- If a task can be solved with a small patch, choose the small patch.
+- If validation fails because of unrelated existing issues, report that clearly without expanding scope.

@@ -1,14 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
-
-export type SearchMode = 'find' | 'replace';
-export type SearchScope = 'document' | 'folder';
-
-type SearchMatch = {
-  lineNumber: number;
-  lineText: string;
-  start: number;
-  end: number;
-};
+import { type SearchMatch, type SearchMode, type SearchScope, useSearchCommands } from '@/components/mirror/panels/useSearchCommands';
+import {
+  getDocumentResultHint,
+  getFolderResultHint,
+  getReplaceInputPlaceholder,
+  getSearchInputPlaceholder,
+} from '@/components/mirror/panels/searchPanelText';
+export type { SearchMode, SearchScope };
 
 type Props = {
   document: ShellDocument | null;
@@ -30,41 +27,6 @@ type Props = {
   onReplaceContent: (content: string) => void;
   onApplyFolderReplace: (docs: ShellDocument[]) => void;
 };
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function buildMatches(content: string, query: string) {
-  const trimmedQuery = query.trim();
-  if (!trimmedQuery) {
-    return [] as SearchMatch[];
-  }
-
-  const matcher = new RegExp(escapeRegExp(trimmedQuery), 'gi');
-  const lines = content.split(/\r?\n/);
-  const matches: SearchMatch[] = [];
-
-  lines.forEach((lineText, index) => {
-    matcher.lastIndex = 0;
-    let result = matcher.exec(lineText);
-    while (result) {
-      const matchedText = result[0] ?? '';
-      matches.push({
-        lineNumber: index + 1,
-        lineText,
-        start: result.index,
-        end: result.index + matchedText.length,
-      });
-      if (!matchedText.length) {
-        break;
-      }
-      result = matcher.exec(lineText);
-    }
-  });
-
-  return matches;
-}
 
 function renderHighlightedLine(lineText: string, start: number, end: number) {
   const before = lineText.slice(0, start);
@@ -102,7 +64,6 @@ function isSearchSelectionMatch(
 export function SearchPanel({
   document,
   folderPath,
-  activeLine = null,
   searchSelection = null,
   mode,
   scope,
@@ -119,175 +80,38 @@ export function SearchPanel({
   onReplaceContent,
   onApplyFolderReplace,
 }: Props) {
-  const [folderMatches, setFolderMatches] = useState<FolderSearchMatch[]>([]);
-  const [folderBusy, setFolderBusy] = useState(false);
-  const [folderStatus, setFolderStatus] = useState('');
-
-  const documentMatches = useMemo(() => buildMatches(document?.content ?? '', query), [document?.content, query]);
-  const currentMatches = scope === 'folder' ? folderMatches : documentMatches;
-  const hasDocument = Boolean(document);
-  const hasFolder = Boolean(folderPath);
-
-  useEffect(() => {
-    if (!hasFolder && scope === 'folder') {
-      onScopeChange('document');
-    }
-  }, [hasFolder, onScopeChange, scope]);
-
-  useEffect(() => {
-    if (!hasDocument && hasFolder && scope === 'document') {
-      onScopeChange('folder');
-    }
-  }, [hasDocument, hasFolder, onScopeChange, scope]);
-
-  useEffect(() => {
-    onSelectedIndexChange(0);
-    setFolderStatus('');
-  }, [folderPath, mode, onSelectedIndexChange, query, scope]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function runFolderSearch() {
-      if (scope !== 'folder') {
-        setFolderMatches([]);
-        return;
-      }
-
-      if (!folderPath || !query.trim()) {
-        setFolderMatches([]);
-        return;
-      }
-
-      setFolderBusy(true);
-      try {
-        const results = await window.eduFixerApi?.searchInFolder({
-          folderPath,
-          query,
-        });
-        if (!cancelled) {
-          setFolderMatches(results ?? []);
-        }
-      } catch {
-        if (!cancelled) {
-          setFolderMatches([]);
-          setFolderStatus('폴더 검색 중 오류가 발생했습니다');
-        }
-      } finally {
-        if (!cancelled) {
-          setFolderBusy(false);
-        }
-      }
-    }
-
-    void runFolderSearch();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [folderPath, query, scope]);
-
-  function moveSelection(direction: 1 | -1) {
-    if (!currentMatches.length) {
-      return;
-    }
-
-    const nextIndex = (selectedIndex + direction + currentMatches.length) % currentMatches.length;
-    const nextMatch = currentMatches[nextIndex];
-    onSelectedIndexChange(nextIndex);
-
-    if (scope === 'folder') {
-      onSelectFolderResult(nextMatch as FolderSearchMatch);
-      return;
-    }
-
-    onSelectResult(nextMatch as SearchMatch);
-  }
-
-  function replaceCurrentDocumentMatch() {
-    if (!document || !query.trim() || scope !== 'document') {
-      return;
-    }
-
-    const selectedMatch = currentMatches[selectedIndex] ?? null;
-    const target = selectedMatch as SearchMatch | null;
-    if (!target) {
-      return;
-    }
-
-    const lines = document.content.split(/\r?\n/);
-    const lineIndex = target.lineNumber - 1;
-    const lineText = lines[lineIndex] ?? '';
-    lines[lineIndex] = lineText.slice(0, target.start) + replaceValue + lineText.slice(target.end);
-    onReplaceContent(lines.join('\n'));
-  }
-
-  function replaceAllDocumentMatches() {
-    if (!document || !query.trim() || scope !== 'document') {
-      return;
-    }
-
-    const matcher = new RegExp(escapeRegExp(query.trim()), 'gi');
-    onReplaceContent(document.content.replace(matcher, replaceValue));
-  }
-
-  async function replaceAllFolderMatches() {
-    if (!folderPath || !query.trim() || scope !== 'folder') {
-      return;
-    }
-
-    setFolderBusy(true);
-    setFolderStatus('');
-    try {
-      const result = await window.eduFixerApi?.replaceInFolder({
-        folderPath,
-        query,
-        replaceValue,
-      });
-
-      if (!result) {
-        setFolderStatus('폴더 일괄 바꾸기를 완료하지 못했습니다');
-        return;
-      }
-
-      onApplyFolderReplace(result.changedFiles);
-      setFolderStatus(`${result.changedFileCount}개 파일, ${result.replacementCount}건 바꿨습니다`);
-
-      const refreshedResults = await window.eduFixerApi?.searchInFolder({
-        folderPath,
-        query,
-      });
-      setFolderMatches(refreshedResults ?? []);
-      onSelectedIndexChange(0);
-    } catch {
-      setFolderStatus('폴더 일괄 바꾸기 중 오류가 발생했습니다');
-    } finally {
-      setFolderBusy(false);
-    }
-  }
-
-  const countLabel = (() => {
-    if (scope === 'folder') {
-      if (!hasFolder) {
-        return '열린 폴더 없음';
-      }
-      if (!query.trim()) {
-        return '검색어를 입력하세요';
-      }
-      if (folderBusy) {
-        return '폴더 검색 중...';
-      }
-      return `${folderMatches.length}개 결과`;
-    }
-
-    if (!hasDocument) {
-      return '열린 문서 없음';
-    }
-    if (!query.trim()) {
-      return '검색어를 입력하세요';
-    }
-    return `${documentMatches.length}개 결과`;
-  })();
+  const {
+    hasDocument,
+    hasFolder,
+    folderMatches,
+    folderBusy,
+    folderStatus,
+    documentMatches,
+    currentMatches,
+    countLabel,
+    moveSelection,
+    replaceCurrentDocumentMatch,
+    replaceAllDocumentMatches,
+    replaceAllFolderMatches,
+  } = useSearchCommands({
+    document,
+    folderPath,
+    mode,
+    scope,
+    query,
+    replaceValue,
+    selectedIndex,
+    onScopeChange,
+    onSelectedIndexChange,
+    onSelectResult,
+    onSelectFolderResult,
+    onReplaceContent,
+    onApplyFolderReplace,
+  });
+  const inputPlaceholder = getSearchInputPlaceholder(scope, hasFolder, hasDocument);
+  const replacePlaceholder = getReplaceInputPlaceholder(scope);
+  const folderHint = getFolderResultHint(hasFolder, query, folderBusy, folderMatches.length);
+  const documentHint = getDocumentResultHint(hasDocument, query, documentMatches.length);
 
   return (
     <div className="panel active" id="panel-search">
@@ -330,17 +154,7 @@ export function SearchPanel({
           <input
             type="text"
             className="search-input panel-input"
-            placeholder={
-              scope === 'folder'
-                ? hasFolder
-                  ? '열린 폴더 전체에서 검색...'
-                  : '폴더를 먼저 열어주세요'
-                : hasDocument
-                  ? '현재 문서에서 검색...'
-                  : hasFolder
-                    ? '현재 문서가 없어 폴더 전체 검색으로 전환됩니다'
-                    : '문서를 먼저 열어주세요'
-            }
+            placeholder={inputPlaceholder}
             value={query}
             disabled={scope === 'folder' ? !hasFolder : !hasDocument}
             onChange={(event) => onQueryChange(event.target.value)}
@@ -362,7 +176,7 @@ export function SearchPanel({
             <input
               type="text"
               className="search-input panel-input"
-              placeholder={scope === 'folder' ? '폴더 전체에서 바꿀 내용...' : '현재 문서에서 바꿀 내용...'}
+              placeholder={replacePlaceholder}
               value={replaceValue}
               disabled={scope === 'folder' ? !hasFolder : !hasDocument}
               onChange={(event) => onReplaceValueChange(event.target.value)}
@@ -405,14 +219,8 @@ export function SearchPanel({
 
         <div className="search-results">
           {scope === 'folder' ? (
-            !hasFolder ? (
-              <div className="search-hint">현재 문서 기준 폴더를 찾을 수 없습니다</div>
-            ) : !query.trim() ? (
-              <div className="search-hint">검색어를 입력하세요</div>
-            ) : folderBusy ? (
-              <div className="search-hint">폴더 전체를 검색하고 있습니다</div>
-            ) : !folderMatches.length ? (
-              <div className="search-hint">일치하는 결과가 없습니다</div>
+            folderHint ? (
+              <div className="search-hint">{folderHint}</div>
             ) : (
               folderMatches.map((match, index) => (
                 <button
@@ -434,12 +242,8 @@ export function SearchPanel({
                 </button>
               ))
             )
-          ) : !hasDocument ? (
-            <div className="search-hint">검색할 문서를 먼저 열어주세요</div>
-          ) : !query.trim() ? (
-            <div className="search-hint">검색어를 입력하세요</div>
-          ) : !documentMatches.length ? (
-            <div className="search-hint">일치하는 결과가 없습니다</div>
+          ) : documentHint ? (
+            <div className="search-hint">{documentHint}</div>
           ) : (
             documentMatches.map((match, index) => (
               <button

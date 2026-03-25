@@ -1,0 +1,84 @@
+/* Theme tokens: raw color values live only in this file. */
+
+:root {
+  color-scheme: dark;
+
+  /* Core surfaces */
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d30;
+  --bg-hover: #2a2d2e;
+  --bg-active: #37373d;
+  --bg-input: #3c3c3c;
+
+  /* Text */
+  --text-primary: #d4d4d4;
+  --text-secondary: #9d9d9d;
+  --text-muted: #6d6d6d;
+
+  /* Borders and accents */
+  --border: #3f3f46;
+  --border-light: #4a4a4f;
+  --accent: #0078d4;
+  --accent-hover: #106ebe;
+  --status-bar: #007acc;
+  --tab-active: #1e1e1e;
+  --tab-inactive: #2d2d30;
+  --tab-border: #252526;
+
+  /* Semantic tones */
+  --tone-success: #4ec9b0;
+  --tone-warning: #f0a46b;
+  --tone-danger: #f44747;
+  --tone-info: #569cd6;
+  --tone-brand-green: #58c472;
+  --tone-brand-pink: #ff2aa1;
+
+  --tone-on-accent: #ffffff;
+  --tone-surface-contrast: #f8fafc;
+  --tone-label-pill-bg: rgba(255, 255, 255, 0.88);
+  --tone-label-pill-fg: #111827;
+
+  /* Search highlight */
+  --search-accent-bg: rgba(255, 214, 10, 0.26);
+  --search-accent-border: rgba(255, 196, 0, 0.92);
+  --search-accent-strong: rgba(255, 214, 10, 0.96);
+  --search-accent-selection: rgba(255, 214, 10, 0.68);
+  --search-accent-text: #161616;
+}
+
+body.light-theme {
+  color-scheme: light;
+
+  --bg-primary: #f5f6f8;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #eef1f4;
+  --bg-hover: #e7ebf0;
+  --bg-active: #dfe5ec;
+  --bg-input: #ffffff;
+
+  --text-primary: #1f2328;
+  --text-secondary: #57606a;
+  --text-muted: #7d8590;
+
+  --border: #d0d7de;
+  --border-light: #d8dee4;
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --status-bar: #0969da;
+  --tab-active: #ffffff;
+  --tab-inactive: #eef1f4;
+  --tab-border: #d0d7de;
+
+  --tone-warning: #d97706;
+  --tone-on-accent: #ffffff;
+  --tone-surface-contrast: #ffffff;
+  --tone-label-pill-bg: rgba(255, 255, 255, 0.96);
+  --tone-label-pill-fg: #111827;
+
+  --search-accent-bg: rgba(255, 208, 0, 0.28);
+  --search-accent-border: rgba(217, 119, 6, 0.94);
+  --search-accent-strong: rgba(255, 208, 0, 0.98);
+  --search-accent-selection: rgba(255, 208, 0, 0.62);
+  --search-accent-text: #111827;
+}

@@ -57,7 +57,7 @@ export function DatasetPanel({ onOpenDataset, stats, syncStatus }: Props) {
             <div className="dataset-summary-item"><span className={`sync-dot ${(syncStatus?.pendingCount ?? 0) > 0 ? 'pending' : 'synced'}`} /> 서버 이관 대기 {syncStatus?.pendingCount ?? 0}건</div>
           </div>
         </div>
-        <button className="btn btn-primary full-width mt8" onClick={onOpenDataset}>데이터 보기</button>
+        <button className="btn btn-primary full-width mt8" onClick={onOpenDataset}>데이터 열기</button>
       </div>
     </div>
   );

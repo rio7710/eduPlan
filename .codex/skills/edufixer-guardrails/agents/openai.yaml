@@ -1,0 +1,4 @@
+interface:
+  display_name: "EduFixer Guardrails"
+  short_description: "EduFixer 작업 규칙과 포맷 기준을 강제함"
+  default_prompt: "Use $edufixer-guardrails to work inside the eduFixer repo without unsafe refactors."

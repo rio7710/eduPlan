@@ -1,4 +1,4 @@
-import type { PreviewSelectionMode } from '@/App';
+import type { EditorMode, PreviewSelectionMode } from '@/App';
 import { getCollapsedHeadingOwnerLine } from '@/lib/headingSections';
 import { getFileIcon, getFileIconClass } from '@/utils/fileIcon';
 
@@ -7,12 +7,15 @@ type Props = {
   activeLine?: number | null;
   previewBlockCount?: number;
   selectionMode?: PreviewSelectionMode;
-  surface?: 'Edit' | 'View' | 'Menu' | null;
+  surface?: 'Edit' | 'Render' | 'Menu' | null;
+  editorMode?: EditorMode;
   selectedPreviewLine?: { line: number; endLine?: number; activeLine?: number; label: string } | null;
   collapsedHeadingLines?: number[];
   actionLabel?: string | null;
   onAction?: (() => void) | null;
   actionDisabled?: boolean;
+  renderSyncMode?: 'sync' | 'async';
+  onToggleRenderSyncMode?: (() => void) | null;
 };
 
 type HeadingItem = {
@@ -67,11 +70,13 @@ export function LocationBar({
   previewBlockCount = 0,
   selectionMode = 'text',
   surface = null,
-  selectedPreviewLine = null,
+  editorMode = 'render',
   collapsedHeadingLines = [],
   actionLabel = null,
   onAction = null,
   actionDisabled = false,
+  renderSyncMode = 'sync',
+  onToggleRenderSyncMode = null,
 }: Props) {
   const fileName = document?.fileName ?? '문서 제목.md';
   const normalizedLine = getCollapsedHeadingOwnerLine(
@@ -84,6 +89,10 @@ export function LocationBar({
     headingTrail.length > 1 && headingTrail[0]?.level === 1
       ? headingTrail.slice(1)
       : headingTrail;
+  const surfaceLabel =
+    surface === 'Render'
+      ? 'Render'
+      : (surface ?? 'Render');
 
   return (
     <div className="location-bar" id="location-bar">
@@ -100,8 +109,13 @@ export function LocationBar({
         </span>
       ))}
       <span className="loc-sep">›</span>
-      <span className="loc-item loc-surface-badge" id="loc-surface">{surface ?? 'View'}</span>
+      <span className="loc-item loc-surface-badge" id="loc-surface">{surfaceLabel}</span>
       <div className="loc-right">
+        {editorMode === 'render' && onToggleRenderSyncMode ? (
+          <button className="secondary-button location-inline-action location-sync-toggle" onClick={onToggleRenderSyncMode}>
+            {renderSyncMode === 'sync' ? '동기' : '비동기'}
+          </button>
+        ) : null}
         {actionLabel && onAction ? (
           <button className="secondary-button location-inline-action" onClick={onAction} disabled={actionDisabled}>
             {actionLabel}

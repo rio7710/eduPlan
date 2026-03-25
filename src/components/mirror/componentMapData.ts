@@ -12,7 +12,6 @@ export const componentMapData = [
   { source: 'panel-mode-wysiwyg', component: 'EditorWysiwygMode' },
   { source: 'panel-mode-markdown', component: 'EditorMarkdownMode' },
   { source: 'panel-mode-html', component: 'EditorHtmlMode' },
-  { source: 'panel-mode-preview', component: 'EditorPreviewMode' },
   { source: 'view-review', component: 'ReviewView' },
   { source: 'view-dataset', component: 'DatasetView' },
   { source: 'view-settings', component: 'SettingsView' },

@@ -1,5 +1,6 @@
 # Preview Selection Rules
 
+
 ## Scope
 
 - 대상 화면: `보기` 모드
@@ -42,6 +43,7 @@
 ## Current Exceptions / Notes
 
 - 현재 preview 는 HTML 렌더 기반이다. CodeMirror 거터 선택과는 다르다.
+- 로딩시 기본값으로 사용한다.
 - `문자 선택`은 현재 기준 동작으로 본다.
 - `라인 선택`은 브라우저 selection API 의 line boundary 동작에 영향을 받을 수 있다.
 - heading, list, table, link 등 복합 HTML 구조에서는 `보이는 행` 판정이 브라우저 구현에 따라 달라질 수 있다.

@@ -285,7 +285,7 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
                   <span className={`review-engine-badge ${recommendationSource.toLowerCase().replace('&', '-')}`}>{recommendationSource}</span>
                   <span className="review-ml-badge">{`ML ${mlPercent}%`}</span>
                   <span className="review-doc">{item.sourcePdfName}</span>
-                  <span className="review-time">{item.createdAt.slice(0, 16).replace('T', ' ')}</span>
+                  <span className="review-time">{(item.createdAt || '').slice(0, 16).replace('T', ' ')}</span>
                 </div>
                 <div className="review-score">
                   <span className="score-label">품질 점수</span>

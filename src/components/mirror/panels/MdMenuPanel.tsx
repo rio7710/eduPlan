@@ -4,6 +4,7 @@ import { extractHeadings, type HeadingItem } from '@/lib/headingSections';
 type Props = {
   document: ShellDocument | null;
   activeLine?: number | null;
+  directActiveLine?: number | null;
   onSelectHeading: (lineNumber: number) => void;
   collapsedLineNumbers: number[];
   onToggleHeadingCollapse: (lineNumber: number) => void;
@@ -34,6 +35,7 @@ function compactRepeatedHeadings(headings: HeadingItem[]) {
 export function MdMenuPanel({
   document,
   activeLine = null,
+  directActiveLine = null,
   onSelectHeading,
   collapsedLineNumbers = [],
   onToggleHeadingCollapse = () => {},
@@ -46,6 +48,11 @@ export function MdMenuPanel({
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
   const activeHeadingId = useMemo(() => {
+    if (directActiveLine) {
+      const directHeading = headings.find((heading) => heading.lineNumber === directActiveLine) ?? null;
+      return directHeading ? directHeading.id : null;
+    }
+
     if (!activeLine) {
       return null;
     }
@@ -58,7 +65,7 @@ export function MdMenuPanel({
     }, null);
 
     return activeHeading ? activeHeading.id : null;
-  }, [activeLine, headings]);
+  }, [activeLine, directActiveLine, headings]);
 
   useEffect(() => {
     activeItemRef.current?.scrollIntoView({ block: 'nearest' });

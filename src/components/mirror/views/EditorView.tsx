@@ -1,11 +1,11 @@
 import type { EditorMode, PreviewSelectionMode } from '@/App';
 import type { FocusOwner } from '@/lib/focusSync';
 import TurndownService from 'turndown';
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { CodeEditor } from '@/components/CodeEditor';
 import { LocationBar } from '@/components/mirror/editor/LocationBar';
 import { ModeToggleBar } from '@/components/mirror/editor/ModeToggleBar';
-import { PreviewPane } from '@/components/PreviewPane';
+import { ReactMarkdownPane } from '@/components/ReactMarkdownPane';
 import { WysiwygPane } from '@/components/WysiwygPane';
 import { marked } from 'marked';
 
@@ -16,12 +16,13 @@ type Props = {
   onToggleAutoWrap: () => void;
   previewSelectionMode: PreviewSelectionMode;
   onChangePreviewSelectionMode: (mode: PreviewSelectionMode) => void;
-  locationSurface?: 'Edit' | 'View' | 'Menu' | null;
-  onLocationSurfaceChange?: (surface: 'Edit' | 'View' | 'Menu' | null) => void;
+  locationSurface?: 'Edit' | 'Render' | 'Menu' | null;
+  onLocationSurfaceChange?: (surface: 'Edit' | 'Render' | 'Menu' | null) => void;
   document: ShellDocument | null;
   theme: 'dark' | 'light';
   activeLine?: number | null;
-  scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'View' | 'Both'; editorLine?: number; previewLine?: number } | null;
+  renderLocationLine?: number | null;
+  scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'Render' | 'Both'; editorLine?: number; previewLine?: number } | null;
   selectionRequest?: { line: number; token: number } | null;
   onSelectionRequestApplied?: () => void;
   selectedPreviewLine?: { line: number; endLine?: number; activeLine?: number; label: string } | null;
@@ -31,6 +32,7 @@ type Props = {
   onSelectPreviewLine: (selection: { line: number; endLine?: number; activeLine?: number; label: string } | null) => void;
   onEditorActiveLineChange?: (line: number | null) => void;
   onPreviewActiveLineChange?: (line: number | null) => void;
+  onRenderActiveLineChange?: (line: number | null) => void;
   onEditorLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
   onPreviewLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
   onPreviewInteraction?: () => void;
@@ -42,9 +44,144 @@ type Props = {
   actionLabel?: string | null;
   onAction?: (() => void) | null;
   actionDisabled?: boolean;
+  renderSyncMode?: 'sync' | 'async';
+  onToggleRenderSyncMode?: (() => void) | null;
 };
 
 const turndown = new TurndownService();
+
+type SplitEditorPaneProps = {
+  content: string;
+  documentPath: string | null;
+  documentName: string | null;
+  theme: 'dark' | 'light';
+  autoWrap: boolean;
+  scrollRequest: Props['scrollRequest'];
+  selectionRequest: Props['selectionRequest'];
+  onSelectionRequestApplied?: () => void;
+  collapsedHeadingLines: number[];
+  onEditorActiveLineChange?: (line: number | null) => void;
+  onEditorLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
+  onEditorInteraction?: () => void;
+  onMouseFocus?: () => void;
+  onScrollRatioChange?: (ratio: number) => void;
+  syncScrollRatio?: number | null;
+  onChangeContent: (content: string) => void;
+  onLocationSurfaceChange?: (surface: 'Edit' | 'Render' | 'Menu' | null) => void;
+};
+
+type SplitRenderPaneProps = {
+  content: string;
+  autoWrap: boolean;
+  scrollRequest: Props['scrollRequest'];
+  onPreviewActiveLineChange?: (line: number | null) => void;
+  onPreviewLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
+  onMouseFocus?: () => void;
+  onScrollRatioChange?: (ratio: number) => void;
+  syncScrollRatio?: number | null;
+  onLocationSurfaceChange?: (surface: 'Edit' | 'Render' | 'Menu' | null) => void;
+};
+
+const SplitEditorPane = memo(function SplitEditorPane({
+  content,
+  documentPath,
+  documentName,
+  theme,
+  autoWrap,
+  scrollRequest,
+  selectionRequest,
+  onSelectionRequestApplied,
+  collapsedHeadingLines,
+  onEditorActiveLineChange,
+  onEditorLocationTrigger,
+  onEditorInteraction,
+  onMouseFocus,
+  onScrollRatioChange,
+  syncScrollRatio = null,
+  onChangeContent,
+  onLocationSurfaceChange,
+}: SplitEditorPaneProps) {
+  return (
+    <div
+      className="editor-split-pane editor-split-pane-editor"
+      onMouseDown={() => onLocationSurfaceChange?.('Edit')}
+      onMouseEnter={() => onLocationSurfaceChange?.('Edit')}
+    >
+      <CodeEditor
+        mode="markdown"
+        value={content}
+        documentPath={documentPath}
+        documentName={documentName}
+        themeMode={theme}
+        autoWrap={autoWrap}
+        active
+        scrollRequest={scrollRequest}
+        selectionRequest={selectionRequest}
+        onSelectionRequestApplied={onSelectionRequestApplied}
+        collapsedHeadingLines={collapsedHeadingLines}
+        onActiveLineChange={onEditorActiveLineChange}
+        onLocationTrigger={onEditorLocationTrigger}
+        onEditorInteraction={onEditorInteraction}
+        onMouseFocus={onMouseFocus}
+        onScrollRatioChange={onScrollRatioChange}
+        syncScrollRatio={syncScrollRatio}
+        onChange={onChangeContent}
+      />
+    </div>
+  );
+}, (prev, next) =>
+  prev.content === next.content
+  && prev.documentPath === next.documentPath
+  && prev.documentName === next.documentName
+  && prev.theme === next.theme
+  && prev.autoWrap === next.autoWrap
+  && prev.syncScrollRatio === next.syncScrollRatio
+  && prev.scrollRequest?.token === next.scrollRequest?.token
+  && prev.scrollRequest?.line === next.scrollRequest?.line
+  && prev.scrollRequest?.target === next.scrollRequest?.target
+  && prev.selectionRequest?.token === next.selectionRequest?.token
+  && prev.selectionRequest?.line === next.selectionRequest?.line
+  && prev.collapsedHeadingLines.length === next.collapsedHeadingLines.length
+  && prev.collapsedHeadingLines.every((line, index) => line === next.collapsedHeadingLines[index]),
+);
+
+const SplitRenderPane = memo(function SplitRenderPane({
+  content,
+  autoWrap,
+  scrollRequest,
+  onPreviewActiveLineChange,
+  onPreviewLocationTrigger,
+  onMouseFocus,
+  onScrollRatioChange,
+  syncScrollRatio = null,
+  onLocationSurfaceChange,
+}: SplitRenderPaneProps) {
+  return (
+    <div
+      className="editor-split-pane editor-split-pane-preview"
+      onMouseDown={() => onLocationSurfaceChange?.('Render')}
+      onMouseEnter={() => onLocationSurfaceChange?.('Render')}
+    >
+      <ReactMarkdownPane
+        markdownText={content}
+        autoWrap={autoWrap}
+        scrollRequest={scrollRequest}
+        onActiveLineChange={onPreviewActiveLineChange}
+        onLocationTrigger={onPreviewLocationTrigger}
+        onMouseFocus={onMouseFocus}
+        onScrollRatioChange={onScrollRatioChange}
+        syncScrollRatio={syncScrollRatio}
+      />
+    </div>
+  );
+}, (prev, next) =>
+  prev.content === next.content
+  && prev.autoWrap === next.autoWrap
+  && prev.syncScrollRatio === next.syncScrollRatio
+  && prev.scrollRequest?.token === next.scrollRequest?.token
+  && prev.scrollRequest?.line === next.scrollRequest?.line
+  && prev.scrollRequest?.target === next.scrollRequest?.target,
+);
 
 export function EditorView({
   editorMode,
@@ -58,6 +195,7 @@ export function EditorView({
   document,
   theme,
   activeLine = null,
+  renderLocationLine = null,
   scrollRequest = null,
   selectionRequest = null,
   onSelectionRequestApplied,
@@ -68,6 +206,7 @@ export function EditorView({
   onSelectPreviewLine,
   onEditorActiveLineChange,
   onPreviewActiveLineChange,
+  onRenderActiveLineChange,
   onEditorLocationTrigger,
   onPreviewLocationTrigger,
   onPreviewInteraction,
@@ -79,6 +218,8 @@ export function EditorView({
   actionLabel = null,
   onAction = null,
   actionDisabled = false,
+  renderSyncMode = 'sync',
+  onToggleRenderSyncMode = null,
 }: Props) {
   const content = document?.content ?? '';
   const htmlContent = useMemo(() => {
@@ -94,7 +235,7 @@ export function EditorView({
     width: '1px',
     height: '100%',
   } as const;
-  const [scrollLeader, setScrollLeader] = useState<'editor' | 'preview' | null>(null);
+  const [scrollLeader, setScrollLeader] = useState<'editor' | 'render' | null>(null);
   const [editorScrollRatio, setEditorScrollRatio] = useState(0);
   const [previewScrollRatio, setPreviewScrollRatio] = useState(0);
   const suppressPreviewActiveSync = splitSyncEnabled && editorMode === 'split' && focusOwner === 'editor';
@@ -102,7 +243,7 @@ export function EditorView({
   const isPreviewToEditorSync = splitScrollSyncMode === 'preview-to-editor';
   const isBidirectionalSync = splitScrollSyncMode === 'bidirectional';
   const editorSyncScrollRatio =
-    isSplit && (isPreviewToEditorSync || (isBidirectionalSync && scrollLeader === 'preview'))
+    isSplit && (isPreviewToEditorSync || (isBidirectionalSync && scrollLeader === 'render'))
       ? previewScrollRatio
       : null;
   const previewSyncScrollRatio =
@@ -110,7 +251,7 @@ export function EditorView({
       ? editorScrollRatio
       : null;
   const splitEditorScrollRequest =
-    scrollRequest?.target === 'View'
+    scrollRequest?.target === 'Render'
       ? null
       : scrollRequest?.target === 'Both' && typeof scrollRequest.editorLine === 'number'
         ? {
@@ -143,18 +284,37 @@ export function EditorView({
         onToggleAutoWrap={onToggleAutoWrap}
         previewSelectionMode={previewSelectionMode}
         onChangePreviewSelectionMode={onChangePreviewSelectionMode}
+        renderSelectionControls={editorMode === 'render' ? (
+          <div className="preview-selection-switch render-selection-switch" role="tablist" aria-label="렌더 선택 방식">
+            <button
+              className={`mode-btn compact ${previewSelectionMode === 'text' ? 'active' : ''}`}
+              onClick={() => onChangePreviewSelectionMode('text')}
+            >
+              문자 선택
+            </button>
+            <button
+              className={`mode-btn compact ${previewSelectionMode === 'line' ? 'active' : ''}`}
+              onClick={() => onChangePreviewSelectionMode('line')}
+            >
+              라인 선택
+            </button>
+          </div>
+        ) : null}
       />
       <LocationBar
         document={document}
-        activeLine={activeLine}
+        activeLine={editorMode === 'render' ? renderLocationLine : activeLine}
         selectedPreviewLine={null}
         previewBlockCount={0}
         selectionMode={previewSelectionMode}
         surface={locationSurface}
+        editorMode={editorMode}
         collapsedHeadingLines={collapsedHeadingLines}
         actionLabel={actionLabel}
         onAction={onAction}
         actionDisabled={actionDisabled}
+        renderSyncMode={renderSyncMode}
+        onToggleRenderSyncMode={onToggleRenderSyncMode}
       />
       {editorMode === 'wysiwyg' ? (
         <div
@@ -189,32 +349,19 @@ export function EditorView({
           </div>
         </div>
       ) : null}
-      {editorMode === 'preview' ? (
+      {editorMode === 'render' ? (
         <div
           style={panelWrapperStyle}
-          onMouseDown={() => onLocationSurfaceChange?.('View')}
-          onMouseEnter={() => onLocationSurfaceChange?.('View')}
+          onMouseDown={() => onLocationSurfaceChange?.('Render')}
+          onMouseEnter={() => onLocationSurfaceChange?.('Render')}
         >
           <div className="editor-mode-panel active">
-            <PreviewPane
-              key={document?.id ?? 'preview'}
+            <ReactMarkdownPane
               markdownText={content}
-              documentPath={document?.filePath ?? null}
-              scrollRequest={scrollRequest}
-              selectedLine={selectedPreviewLine?.line ?? null}
-              selectedEndLine={selectedPreviewLine?.endLine ?? null}
-              activeLine={activeLine}
-              searchSelection={searchSelection}
-              themeMode={theme}
               autoWrap={autoWrap}
               selectionMode={previewSelectionMode}
-              collapsedHeadingLines={collapsedHeadingLines}
-              onToggleCollapsedHeading={onToggleCollapsedHeading}
-              onSelectLine={onSelectPreviewLine}
-              onActiveLineChange={onPreviewActiveLineChange}
-              onLocationTrigger={onPreviewLocationTrigger}
-              suppressActiveLineSync={suppressPreviewActiveSync}
-              onMouseFocus={onPreviewInteraction}
+              scrollRequest={scrollRequest}
+              onActiveLineChange={onRenderActiveLineChange}
             />
           </div>
         </div>
@@ -222,82 +369,58 @@ export function EditorView({
       {editorMode === 'split' ? (
         <div style={panelWrapperStyle}>
           <div className="editor-mode-panel active editor-split-layout" style={splitLayoutStyle}>
-            <div
-              className="editor-split-pane editor-split-pane-editor"
-              onMouseDown={() => onLocationSurfaceChange?.('Edit')}
-              onMouseEnter={() => onLocationSurfaceChange?.('Edit')}
-            >
-              <CodeEditor
-                mode="markdown"
-                value={content}
-                documentPath={document?.filePath ?? null}
-                documentName={document?.fileName ?? null}
-                themeMode={theme}
-                autoWrap={autoWrap}
-                active
-                scrollRequest={splitEditorScrollRequest}
-                selectionRequest={selectionRequest}
-                onSelectionRequestApplied={onSelectionRequestApplied}
-                collapsedHeadingLines={collapsedHeadingLines}
-                onActiveLineChange={onEditorActiveLineChange}
-                onLocationTrigger={onEditorLocationTrigger}
-                onEditorInteraction={onEditorInteraction}
-                onMouseFocus={isBidirectionalSync ? () => setScrollLeader('editor') : undefined}
-                onScrollRatioChange={
-                  isBidirectionalSync
-                    ? (ratio) => {
-                      setScrollLeader('editor');
-                      setEditorScrollRatio(ratio);
-                    }
-                    : undefined
-                }
-                syncScrollRatio={editorSyncScrollRatio}
-                onChange={onChangeContent}
-              />
-            </div>
-            <div className="editor-split-divider" aria-hidden="true" style={splitDividerStyle} />
-            <div
-              className="editor-split-pane editor-split-pane-preview"
-              onMouseDown={() => onLocationSurfaceChange?.('View')}
-              onMouseEnter={() => onLocationSurfaceChange?.('View')}
-            >
-              <PreviewPane
-                key={`${document?.id ?? 'preview'}-split`}
-                markdownText={content}
-                documentPath={document?.filePath ?? null}
-                scrollRequest={splitPreviewScrollRequest}
-                selectedLine={selectedPreviewLine?.line ?? null}
-                selectedEndLine={selectedPreviewLine?.endLine ?? null}
-                activeLine={activeLine}
-                searchSelection={searchSelection}
-                themeMode={theme}
-                autoWrap={autoWrap}
-                selectionMode={previewSelectionMode}
-                collapsedHeadingLines={collapsedHeadingLines}
-                onToggleCollapsedHeading={onToggleCollapsedHeading}
-                onSelectLine={onSelectPreviewLine}
-                onActiveLineChange={onPreviewActiveLineChange}
-                onLocationTrigger={onPreviewLocationTrigger}
-                suppressActiveLineSync={suppressPreviewActiveSync}
-                onMouseFocus={() => {
-                  onPreviewInteraction?.();
-                  if (isBidirectionalSync) {
-                    setScrollLeader('preview');
+            <SplitEditorPane
+              content={content}
+              documentPath={document?.filePath ?? null}
+              documentName={document?.fileName ?? null}
+              theme={theme}
+              autoWrap={autoWrap}
+              scrollRequest={splitEditorScrollRequest}
+              selectionRequest={selectionRequest}
+              onSelectionRequestApplied={onSelectionRequestApplied}
+              collapsedHeadingLines={collapsedHeadingLines}
+              onEditorActiveLineChange={onEditorActiveLineChange}
+              onEditorLocationTrigger={onEditorLocationTrigger}
+              onEditorInteraction={onEditorInteraction}
+              onMouseFocus={isBidirectionalSync ? () => setScrollLeader('editor') : undefined}
+              onScrollRatioChange={
+                isBidirectionalSync
+                  ? (ratio) => {
+                    setScrollLeader('editor');
+                    setEditorScrollRatio(ratio);
                   }
-                }}
-                onScrollRatioChange={
-                  isPreviewToEditorSync || isBidirectionalSync
-                    ? (ratio) => {
-                      if (isBidirectionalSync) {
-                        setScrollLeader('preview');
-                      }
-                      setPreviewScrollRatio(ratio);
-                    }
-                    : undefined
+                  : undefined
+              }
+              syncScrollRatio={editorSyncScrollRatio}
+              onChangeContent={onChangeContent}
+              onLocationSurfaceChange={onLocationSurfaceChange}
+            />
+            <div className="editor-split-divider" aria-hidden="true" style={splitDividerStyle} />
+            <SplitRenderPane
+              content={content}
+              autoWrap={autoWrap}
+              scrollRequest={splitPreviewScrollRequest}
+              onPreviewActiveLineChange={onPreviewActiveLineChange}
+              onPreviewLocationTrigger={onPreviewLocationTrigger}
+              onMouseFocus={() => {
+                onPreviewInteraction?.();
+                if (isBidirectionalSync) {
+                  setScrollLeader('render');
                 }
-                syncScrollRatio={previewSyncScrollRatio}
-              />
-            </div>
+              }}
+              onScrollRatioChange={
+                isPreviewToEditorSync || isBidirectionalSync
+                  ? (ratio) => {
+                    if (isBidirectionalSync) {
+                      setScrollLeader('render');
+                    }
+                    setPreviewScrollRatio(ratio);
+                  }
+                  : undefined
+              }
+              syncScrollRatio={previewSyncScrollRatio}
+              onLocationSurfaceChange={onLocationSurfaceChange}
+            />
           </div>
         </div>
       ) : null}

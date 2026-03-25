@@ -1,4 +1,4 @@
-export type FocusOwner = 'editor' | 'preview' | 'search' | 'md-menu' | 'none';
+export type FocusOwner = 'editor' | 'render' | 'search' | 'md-menu' | 'none';
 
 export type FocusSearchSelection = {
   filePath?: string;
@@ -35,12 +35,12 @@ export function requestMenuFocus(): FocusSyncState {
 }
 
 export function requestPreviewFocus(current: FocusSyncState): FocusSyncState {
-  if (current.owner === 'preview' && !current.searchSelection) {
+  if (current.owner === 'render' && !current.searchSelection) {
     return current;
   }
 
   return {
-    owner: 'preview',
+    owner: 'render',
     searchSelection: null,
   };
 }
@@ -64,8 +64,8 @@ export function getFocusOwnerLabel(owner: FocusOwner): string {
   if (owner === 'editor') {
     return '에디터';
   }
-  if (owner === 'preview') {
-    return '보기';
+  if (owner === 'render') {
+    return 'Render';
   }
   if (owner === 'search') {
     return '검색';

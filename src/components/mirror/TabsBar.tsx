@@ -10,11 +10,12 @@ type Tab = {
 type Props = {
   tabs: Tab[];
   activeTab: string;
+  onPressTab?: (tabId: string) => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
 };
 
-export function TabsBar({ tabs, activeTab, onSelectTab, onCloseTab }: Props) {
+export function TabsBar({ tabs, activeTab, onPressTab, onSelectTab, onCloseTab }: Props) {
   return (
     <div className="tabbar" id="tabbar">
       <div className="tabbar-track">
@@ -22,6 +23,7 @@ export function TabsBar({ tabs, activeTab, onSelectTab, onCloseTab }: Props) {
           <DelayedTooltip key={tab.id} content={tab.label}>
             <button
               className={`tab ${activeTab === tab.id ? 'active' : ''}`}
+              onMouseDown={() => onPressTab?.(tab.id)}
               onClick={() => onSelectTab(tab.id)}
             >
               <span className={`tab-icon ${getFileIconClass(tab.label)}`}>{getFileIcon(tab.label)}</span>
@@ -32,6 +34,9 @@ export function TabsBar({ tabs, activeTab, onSelectTab, onCloseTab }: Props) {
                   onClick={(event) => {
                     event.stopPropagation();
                     onCloseTab(tab.id);
+                  }}
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
                   }}
                 >
                   ×

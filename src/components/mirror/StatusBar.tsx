@@ -33,6 +33,11 @@ export function StatusBar({ theme, focusOwnerLabel, selectionModeLabel, selectio
         <span className="status-item">팀: 3명 접속 중</span>
         <span className="status-sep">|</span>
         <span className="status-item">UTF-8</span>
+        <span className="status-sep">|</span>
+        <span className="status-item lamp-indicator" id="status-lamp-indicator">
+          <span className="status-dot lamp" id="status-lamp-dot"></span>
+          <span id="status-lamp-text">램프 블럭 초기화(함수명)</span>
+        </span>
       </div>
     </div>
   );

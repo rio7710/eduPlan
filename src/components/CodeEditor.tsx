@@ -4,7 +4,7 @@ import { html as htmlLang } from '@codemirror/lang-html';
 import { foldEffect, foldedRanges, unfoldEffect } from '@codemirror/language';
 import { redo, undo } from '@codemirror/commands';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { EditorView } from '@codemirror/view';
 import { getHeadingSections } from '@/lib/headingSections';
 
@@ -16,7 +16,7 @@ interface CodeEditorProps {
   themeMode?: 'dark' | 'light';
   autoWrap?: boolean;
   active?: boolean;
-  scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'View' | 'Both' } | null;
+  scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'Render' | 'Both' } | null;
   selectionRequest?: { line: number; token: number } | null;
   collapsedHeadingLines?: number[];
   onActiveLineChange?: (line: number | null) => void;
@@ -29,7 +29,7 @@ interface CodeEditorProps {
   onChange: (value: string) => void;
 }
 
-export function CodeEditor({
+function CodeEditorComponent({
   mode,
   value,
   documentPath = null,
@@ -375,6 +375,28 @@ export function CodeEditor({
     />
   );
 }
+
+export const CodeEditor = memo(
+  CodeEditorComponent,
+  (prev, next) =>
+    prev.mode === next.mode
+    && prev.value === next.value
+    && prev.documentPath === next.documentPath
+    && prev.documentName === next.documentName
+    && prev.themeMode === next.themeMode
+    && prev.autoWrap === next.autoWrap
+    && prev.active === next.active
+    && prev.syncScrollRatio === next.syncScrollRatio
+    && prev.scrollRequest?.token === next.scrollRequest?.token
+    && prev.scrollRequest?.line === next.scrollRequest?.line
+    && prev.scrollRequest?.target === next.scrollRequest?.target
+    && prev.scrollRequest?.startColumn === next.scrollRequest?.startColumn
+    && prev.scrollRequest?.endColumn === next.scrollRequest?.endColumn
+    && prev.selectionRequest?.token === next.selectionRequest?.token
+    && prev.selectionRequest?.line === next.selectionRequest?.line
+    && prev.collapsedHeadingLines.length === next.collapsedHeadingLines.length
+    && prev.collapsedHeadingLines.every((line, index) => line === next.collapsedHeadingLines[index]),
+);
 
 function buildJsMonitorPayload({
   mode,
