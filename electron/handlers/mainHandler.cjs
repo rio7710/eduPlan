@@ -77,6 +77,23 @@ function registerMainHandlers(mainWindow) {
     return resolved.filter(Boolean);
   });
 
+  ipcMain.handle('app:open-path', async (_event, targetPath) => {
+    if (typeof targetPath !== 'string' || !targetPath.trim()) {
+      return { ok: false, error: '경로가 비어 있습니다.' };
+    }
+
+    try {
+      const resolvedPath = path.resolve(targetPath);
+      const result = await shell.openPath(resolvedPath);
+      if (result) {
+        return { ok: false, error: result };
+      }
+      return { ok: true, path: resolvedPath };
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) };
+    }
+  });
+
   // 윈도우 제어
   ipcMain.handle('window:minimize', () => mainWindow?.minimize());
   ipcMain.handle('window:maximize-toggle', () => {

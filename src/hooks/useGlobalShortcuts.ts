@@ -12,7 +12,6 @@ type UseGlobalShortcutsParams = {
   onRedo: () => void;
   onFind: () => void;
   onReplace: () => void;
-  onClearSelection?: () => void;
 };
 
 export function useGlobalShortcuts({
@@ -27,22 +26,20 @@ export function useGlobalShortcuts({
   onRedo,
   onFind,
   onReplace,
-  onClearSelection,
 }: UseGlobalShortcutsParams) {
   const handleKeyDownEvent = useEffectEvent((event: KeyboardEvent) => {
-    if (event.key === 'Escape') {
-      onClearSelection?.();
+    if (event.isComposing) {
       return;
     }
 
     const isCommand = event.ctrlKey || event.metaKey;
-    if (!isCommand) {
+    if (!isCommand || event.altKey) {
       return;
     }
 
     const key = event.key.toLowerCase();
 
-    if (key === 'n') {
+    if (key === 'n' && !event.shiftKey) {
       event.preventDefault();
       onOpenUploadView();
       return;
@@ -88,13 +85,13 @@ export function useGlobalShortcuts({
       return;
     }
 
-    if (key === 'f') {
+    if (key === 'f' && !event.shiftKey) {
       event.preventDefault();
       onFind();
       return;
     }
 
-    if (key === 'h') {
+    if (key === 'h' && !event.shiftKey) {
       event.preventDefault();
       onReplace();
     }

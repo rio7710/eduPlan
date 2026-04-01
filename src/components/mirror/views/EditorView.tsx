@@ -73,6 +73,7 @@ type SplitEditorPaneProps = {
 
 type SplitRenderPaneProps = {
   content: string;
+  documentPath: string | null;
   autoWrap: boolean;
   selectionMode: PreviewSelectionMode;
   searchSelection: Props['searchSelection'];
@@ -156,6 +157,7 @@ const SplitEditorPane = memo(function SplitEditorPane({
 
 const SplitRenderPane = memo(function SplitRenderPane({
   content,
+  documentPath,
   autoWrap,
   selectionMode,
   searchSelection,
@@ -175,6 +177,7 @@ const SplitRenderPane = memo(function SplitRenderPane({
     >
       <ReactMarkdownPane
         markdownText={content}
+        documentPath={documentPath}
         autoWrap={autoWrap}
         selectionMode={selectionMode}
         searchSelection={searchSelection}
@@ -189,6 +192,7 @@ const SplitRenderPane = memo(function SplitRenderPane({
   );
 }, (prev, next) =>
   prev.content === next.content
+  && prev.documentPath === next.documentPath
   && prev.autoWrap === next.autoWrap
   && prev.selectionMode === next.selectionMode
   && prev.searchSelection?.lineNumber === next.searchSelection?.lineNumber
@@ -376,6 +380,7 @@ export function EditorView({
           <div className="editor-mode-panel active">
             <ReactMarkdownPane
               markdownText={content}
+              documentPath={document?.filePath ?? null}
               autoWrap={autoWrap}
               selectionMode={previewSelectionMode}
               searchSelection={searchSelection}
@@ -418,6 +423,7 @@ export function EditorView({
             <div className="editor-split-divider" aria-hidden="true" style={splitDividerStyle} />
             <SplitRenderPane
               content={content}
+              documentPath={document?.filePath ?? null}
               autoWrap={autoWrap}
               selectionMode={previewSelectionMode}
               searchSelection={searchSelection}

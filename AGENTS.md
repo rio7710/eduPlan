@@ -2,6 +2,12 @@
 
 Use `d:\OneDrive\Desktop\eduPlan\eduFixer` as the only project root.
 
+## Priority 0 Rules
+
+- Keep every document, code file, skill file, agent guide, and lint-related rule file at 200 lines or fewer when practical.
+- If a file would exceed 200 lines, split it and manage it through a short index file instead of growing one large file.
+- If a decision is ambiguous and the safer choice is not obvious from repo context, stop and ask the user before deciding.
+
 ## Core Rules
 
 - Prefer targeted fixes over broad refactors.

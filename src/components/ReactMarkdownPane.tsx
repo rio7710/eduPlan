@@ -59,6 +59,7 @@ function highlightPreviewSearchText(target: HTMLElement, query: string) {
 
 type ReactMarkdownPaneProps = {
   markdownText: string;
+  documentPath?: string | null;
   autoWrap?: boolean;
   selectionMode?: PreviewSelectionMode;
   searchSelection?: { lineNumber: number; start: number; end: number; query: string } | null;
@@ -72,6 +73,7 @@ type ReactMarkdownPaneProps = {
 
 function ReactMarkdownPaneComponent({
   markdownText,
+  documentPath = null,
   autoWrap = true,
   selectionMode = 'text',
   searchSelection = null,
@@ -491,7 +493,7 @@ function ReactMarkdownPaneComponent({
         onContextMenu={handleContextMenu}
       >
         {markdownText.trim() ? (
-          <PreviewMarkdownContent markdownText={markdownText} headingLines={headingLines} />
+          <PreviewMarkdownContent markdownText={markdownText} documentPath={documentPath} headingLines={headingLines} />
         ) : (
           <div className="empty-stage">미리볼 내용이 없습니다.</div>
         )}
@@ -521,6 +523,7 @@ export const ReactMarkdownPane = memo(
   ReactMarkdownPaneComponent,
   (prev, next) =>
     prev.markdownText === next.markdownText
+    && prev.documentPath === next.documentPath
     && prev.autoWrap === next.autoWrap
     && prev.selectionMode === next.selectionMode
     && prev.searchSelection?.lineNumber === next.searchSelection?.lineNumber

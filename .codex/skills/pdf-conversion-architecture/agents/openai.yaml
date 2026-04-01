@@ -1,0 +1,4 @@
+version: 1
+display_name: PDF Conversion Architecture
+short_description: Plan eduFixer's PDF conversion framework, tool boundaries, OCR strategy, and AI finalization flow.
+default_prompt: Plan or update eduFixer's PDF conversion architecture using the repo-local skill and keep the design aligned with Electron, Python, modular tools, Korean line-break recovery, table extraction, and local-first AI finalization.

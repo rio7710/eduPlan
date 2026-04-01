@@ -4,6 +4,7 @@ import { ComponentMap } from '@/components/mirror/ComponentMap';
 import { ExplorerPanel } from '@/components/mirror/panels/ExplorerPanel';
 import { DatasetPanel } from '@/components/mirror/panels/DatasetPanel';
 import { MdMenuPanel } from '@/components/mirror/panels/MdMenuPanel';
+import { ReportPanel } from '@/components/mirror/panels/ReportPanel';
 import { ReviewPanel } from '@/components/mirror/panels/ReviewPanel';
 import { SearchPanel, type SearchMode, type SearchScope } from '@/components/mirror/panels/SearchPanel';
 import { SettingsPanel } from '@/components/mirror/panels/SettingsPanel';
@@ -29,7 +30,7 @@ import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import { getParentFolderPath } from '@/utils/textUtils';
 import { nextIfChanged, patchIfChanged } from '@/utils/stateUtils';
 
-export type PanelId = 'explorer' | 'md-menu' | 'search' | 'review' | 'dataset' | 'settings';
+export type PanelId = 'explorer' | 'md-menu' | 'search' | 'report' | 'review' | 'dataset' | 'settings';
 export type ViewId = 'welcome' | 'upload' | 'editor' | 'review' | 'dataset' | 'settings';
 export type { EditorMode };
 export type PreviewSelectionMode = 'block' | 'line' | 'text';
@@ -153,9 +154,13 @@ export function App() {
     resetEditorSyncForDocumentRef.current(initialLine);
   }
 
+  const mergeSavedReviewItemsRef = useRef<(items: ReviewItem[]) => void>(() => {});
+
   const {
     clearUploadSelection,
+    convertProgress,
     handleStartSelectedUploadFile,
+    latestReport,
     openUploadForPath,
     setUploadSelection,
     uploadSelection,
@@ -169,9 +174,8 @@ export function App() {
     onOpenShellDocument: (doc) => openShellDocument(doc),
     onOpenView: openView,
     onSetActivePanel: setActivePanel,
-    onAppendLogoReviewItems: (items) => appendLogoReviewItems(items),
+    onAppendReviewItems: (items) => mergeSavedReviewItemsRef.current(items),
   });
-  const mergeSavedReviewItemsRef = useRef<(items: ReviewItem[]) => void>(() => {});
   const {
     activeTab,
     hydrateRecentDocuments,
@@ -445,6 +449,27 @@ export function App() {
     }
   }
 
+  async function handleResetAllDatasetData() {
+    const confirmed = window.confirm('SQLite/ML 데이터 전체를 초기화합니다.\n이 작업은 되돌릴 수 없습니다.\n\n계속할까요?');
+    if (!confirmed) {
+      return;
+    }
+    const result = await window.eduFixerApi?.resetAllDatasetData();
+    await refreshMlDatasetStats();
+    await refreshSyncStatus();
+    if (!result?.ok) {
+      window.alert(`전체 초기화 실패\n\n${result?.error ?? '알 수 없는 오류'}`);
+      return;
+    }
+    window.alert(
+      `초기화 완료\n\n` +
+      `DB 삭제 행: ${result.deletedDbRows ?? 0}\n` +
+      `아티팩트 파일: ${result.removedArtifactCount ?? 0}\n` +
+      `dataset 파일: ${result.removedDatasetFileCount ?? 0}\n` +
+      `해제 용량: ${result.freedBytes ?? 0} bytes`,
+    );
+  }
+
   async function handleRunHierarchyCheck() {
     if (!currentDocument?.filePath?.toLowerCase().endsWith('.md')) {
       return;
@@ -478,7 +503,7 @@ export function App() {
     setToastMessage(uniquePaths.length > 1 ? `${uniquePaths.length}개 파일을 열었습니다.` : '파일을 열었습니다.');
   }
 
-  function handleSubmitTrainingAccess() {
+  async function handleSubmitTrainingAccess() {
     if (trainingPassword !== TRAINING_ACCESS_PASSWORD) {
       handleCloseTrainingAccess();
       window.alert('학습담당자만 학습이 가능합니다.');
@@ -486,7 +511,28 @@ export function App() {
     }
 
     handleCloseTrainingAccess();
-    window.alert('학습 담당자 인증이 완료되었습니다.\n\n실제 학습 실행 연결은 다음 단계에서 붙입니다.');
+    const result = await window.eduFixerApi?.prepareMlTraining(500);
+    await refreshMlDatasetStats();
+    if (!result?.ok) {
+      window.alert('학습 준비 중 오류가 발생했습니다.');
+      return;
+    }
+    if (result.trainError) {
+      window.alert(`학습 실행 실패\n\n${result.trainError}`);
+      return;
+    }
+    const status = result.trained
+      ? `학습 완료 (정확도 ${Math.round((result.trainResult?.validAccuracy ?? 0) * 100)}%)`
+      : result.eligibleForTraining
+        ? '신규 데이터가 없어 학습을 건너뛰었습니다.'
+        : `최소 ${result.minPairs}건 필요 (현재 ${result.totalUserPairs}건)`;
+    window.alert(
+      `학습 데이터 갱신 완료\n\n` +
+      `새 pair: ${result.exportedPairCount}건\n` +
+      `라벨 JSONL: ${result.exportedLabeledCount}건\n` +
+      `누적 user pair: ${result.totalUserPairs}건\n` +
+      `${status}`,
+    );
   }
 
   useAppBootstrap({
@@ -607,6 +653,8 @@ export function App() {
       <div className="workbench">
         <ActivityBar
           activePanel={effectiveActivePanel}
+          activeView={activeView}
+          onOpenUpload={() => openView('upload')}
           showMdMenu={showMdMenu}
           onSelectPanel={(panel) => {
             setActivePanel(panel);
@@ -627,6 +675,9 @@ export function App() {
             <ExplorerPanel
               onOpenView={openView}
               onOpenFolder={handleOpenFolder}
+              onOpenExplorerFolderPath={(folderPath) => {
+                void window.eduFixerApi?.openPath(folderPath);
+              }}
               onOpenExplorerFile={handleOpenExplorerFile}
               onDeleteExplorerFile={handleDeleteExplorerFile}
               includeSubfolders={includeExplorerSubfolders}
@@ -705,8 +756,9 @@ export function App() {
               onApplyFolderReplace={applyUpdatedDocuments}
             />
           ) : null}
-          {effectiveActivePanel === 'review' ? <ReviewPanel onOpenReview={() => openView('review')} items={reviewItems} /> : null}
-          {effectiveActivePanel === 'dataset' ? <DatasetPanel onOpenDataset={() => openView('dataset')} stats={mlDatasetStats} syncStatus={syncStatus} /> : null}
+          {effectiveActivePanel === 'report' ? <ReportPanel report={latestReport} /> : null}
+          {effectiveActivePanel === 'review' ? <ReviewPanel onOpenReview={() => openView('review')} items={reviewItems} report={latestReport} /> : null}
+          {effectiveActivePanel === 'dataset' ? <DatasetPanel onOpenDataset={() => openView('dataset')} onResetAllData={handleResetAllDatasetData} stats={mlDatasetStats} syncStatus={syncStatus} report={latestReport} /> : null}
           {effectiveActivePanel === 'settings' ? <SettingsPanel onOpenSettings={() => openView('settings')} /> : null}
         </div>
 
@@ -741,6 +793,7 @@ export function App() {
             <div className={`view ${activeView === 'upload' ? 'active' : ''}`} id="view-upload">
               <UploadView
                 selectedFile={uploadSelection}
+                progress={convertProgress}
                 onStartSelectedFile={handleStartSelectedUploadFile}
               />
             </div>
@@ -822,10 +875,12 @@ export function App() {
               <DatasetView
                 stats={mlDatasetStats}
                 syncStatus={syncStatus}
+                report={latestReport}
                 onOpenRoot={handleOpenMlDatasetRoot}
                 onExportZip={handleExportMlDatasetZip}
                 onQueueUpload={handleQueueMlDatasetUpload}
                 onOpenTrainingAccess={handleOpenTrainingAccess}
+                onResetAllData={handleResetAllDatasetData}
               />
             </div>
 
@@ -874,17 +929,17 @@ export function App() {
               type="password"
               value={trainingPassword}
               onChange={(event) => setTrainingPassword(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  handleSubmitTrainingAccess();
-                }
-              }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    void handleSubmitTrainingAccess();
+                  }
+                }}
               autoFocus
               placeholder="비밀번호"
             />
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={handleCloseTrainingAccess}>취소</button>
-              <button className="btn btn-primary" onClick={handleSubmitTrainingAccess}>확인</button>
+              <button className="btn btn-primary" onClick={() => { void handleSubmitTrainingAccess(); }}>확인</button>
             </div>
           </div>
         </div>

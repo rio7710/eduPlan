@@ -22,19 +22,13 @@ export function useReviewState({
   const [sentenceReviewItems, setSentenceReviewItems] = useState<SentenceEditReviewItem[]>([]);
 
   async function refreshPersistedLogoReviewItems() {
-    const savedFolderPath = window.localStorage.getItem('eduplan-last-explorer-folder-path');
-    if (!savedFolderPath || !window.eduFixerApi?.scanLogoReviewItems) {
-      setLogoReviewItems([]);
-      return;
-    }
-
-    const items = await window.eduFixerApi.scanLogoReviewItems(savedFolderPath, 'py_lgbm');
-    setLogoReviewItems(items);
+    // Ignore legacy DB-backed review rows. Only session-generated items are valid now.
+    setLogoReviewItems([]);
   }
 
   async function refreshSentenceReviewItems() {
-    const items = await window.eduFixerApi?.getSentenceReviewItems();
-    setSentenceReviewItems(items ?? []);
+    // Ignore legacy DB-backed review rows. Only session-generated items are valid now.
+    setSentenceReviewItems([]);
   }
 
   function mergeSavedReviewItems(items: ReviewItem[]) {
@@ -107,7 +101,11 @@ export function useReviewState({
     }
   }
 
-  async function handleResolveReviewItem(item: ReviewItem, action: 'approve' | 'reject') {
+  async function handleResolveReviewItem(
+    item: ReviewItem,
+    action: 'approve' | 'reject',
+    options?: { approvedText?: string },
+  ) {
     if (item.type === 'hierarchy_pattern') {
       const result = await window.eduFixerApi?.resolveHierarchyReviewItem({
         id: item.id,
@@ -138,6 +136,7 @@ export function useReviewState({
       const result = await window.eduFixerApi?.resolveSentenceReviewItem({
         id: item.id,
         action,
+        approvedText: options?.approvedText,
       });
       if (!result?.ok) {
         return;

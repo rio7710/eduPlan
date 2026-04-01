@@ -3,6 +3,8 @@ import { DelayedTooltip } from '@/components/ui/DelayedTooltip';
 
 type Props = {
   activePanel: PanelId;
+  activeView?: 'welcome' | 'upload' | 'editor' | 'review' | 'dataset' | 'settings';
+  onOpenUpload: () => void;
   onSelectPanel: (panel: PanelId) => void;
   showMdMenu: boolean;
 };
@@ -40,6 +42,16 @@ function iconReview() {
   );
 }
 
+function iconReport() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M7 3h7l5 5v13a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z" />
+      <path d="M14 3v5h5" />
+      <path d="M9 13h6M9 17h6M9 9h2" />
+    </svg>
+  );
+}
+
 function iconDataset() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -59,7 +71,17 @@ function iconSettings() {
   );
 }
 
-export function ActivityBar({ activePanel, onSelectPanel, showMdMenu }: Props) {
+function iconUpload() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M12 16V5" />
+      <path d="M8.5 8.5L12 5l3.5 3.5" />
+      <path d="M5 18a2 2 0 002 2h10a2 2 0 002-2" />
+    </svg>
+  );
+}
+
+export function ActivityBar({ activePanel, activeView = 'welcome', onOpenUpload, onSelectPanel, showMdMenu }: Props) {
   return (
     <div className="activitybar">
       <div className="activity-group top">
@@ -78,6 +100,16 @@ export function ActivityBar({ activePanel, onSelectPanel, showMdMenu }: Props) {
         <DelayedTooltip content="검색">
           <button className={`activity-btn ${activePanel === 'search' ? 'active' : ''}`} data-panel="search" onClick={() => onSelectPanel('search')}>
             {iconSearch()}
+          </button>
+        </DelayedTooltip>
+        <DelayedTooltip content="가져오기">
+          <button className={`activity-btn ${activeView === 'upload' ? 'active' : ''}`} data-panel="upload" onClick={onOpenUpload}>
+            {iconUpload()}
+          </button>
+        </DelayedTooltip>
+        <DelayedTooltip content="변환 레포트">
+          <button className={`activity-btn ${activePanel === 'report' ? 'active' : ''}`} data-panel="report" onClick={() => onSelectPanel('report')}>
+            {iconReport()}
           </button>
         </DelayedTooltip>
         <DelayedTooltip content="ML 데이터 검토">

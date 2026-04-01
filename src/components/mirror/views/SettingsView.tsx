@@ -195,7 +195,7 @@ export function SettingsView({ theme, onToggleTheme, fontSettings, onChangeFontS
             <div className="settings-section">
               <div className="settings-section-title">AI 모델 설정</div>
               <div className="settings-row">
-                <label className="settings-label">기본 분절 모델</label>
+                <label className="settings-label">기본 후처리 AI</label>
                 <select className="settings-select">
                   <option>로컬 (Ollama) - 권장</option>
                   <option>Claude API</option>

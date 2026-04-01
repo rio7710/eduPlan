@@ -1,7 +1,13 @@
 type Props = {
   onOpenDataset: () => void;
+  onResetAllData: () => void;
   stats: MlDatasetStats | null;
   syncStatus: SyncStatus | null;
+  report: {
+    changedPages?: number;
+    pageCount?: number;
+    avgSimilarity?: number;
+  } | null;
 };
 
 function formatBytes(bytes: number) {
@@ -28,7 +34,7 @@ function formatDate(value: string | null) {
   return date.toLocaleDateString('ko-KR');
 }
 
-export function DatasetPanel({ onOpenDataset, stats, syncStatus }: Props) {
+export function DatasetPanel({ onOpenDataset, onResetAllData, stats, syncStatus, report }: Props) {
   const latestRun = stats?.runs?.[0] ?? null;
 
   return (
@@ -53,11 +59,16 @@ export function DatasetPanel({ onOpenDataset, stats, syncStatus }: Props) {
           <div className="dataset-summary-list">
             <div className="dataset-summary-item"><span className="sync-dot synced" /> 라벨 {stats?.labelsCount ?? 0}개</div>
             <div className="dataset-summary-item"><span className="sync-dot pending" /> feature 행 {stats?.featureRowCount ?? 0}개</div>
+            <div className="dataset-summary-item"><span className="sync-dot online" /> TXT 자동승인 {stats?.autoTxtReplaceCount ?? 0}건</div>
+            <div className="dataset-summary-item"><span className="sync-dot online" /> ML pair(user/train) {stats?.userLineBreakPairsCount ?? 0}/{stats?.trainLineBreakPairsCount ?? 0}</div>
+            <div className="dataset-summary-item"><span className="sync-dot online" /> 변경 페이지 {report?.changedPages ?? 0}/{report?.pageCount ?? 0}</div>
+            <div className="dataset-summary-item"><span className="sync-dot online" /> 평균 유사도 {Math.round((report?.avgSimilarity ?? 0) * 100)}%</div>
             <div className="dataset-summary-item"><span className="sync-dot online" /> 최근 run {latestRun ? formatDate(latestRun.updatedAt) : '-'}</div>
             <div className="dataset-summary-item"><span className={`sync-dot ${(syncStatus?.pendingCount ?? 0) > 0 ? 'pending' : 'synced'}`} /> 서버 이관 대기 {syncStatus?.pendingCount ?? 0}건</div>
           </div>
         </div>
         <button className="btn btn-primary full-width mt8" onClick={onOpenDataset}>데이터 열기</button>
+        <button className="btn btn-ghost full-width mt8" onClick={onResetAllData}>DB/ML 전체 초기화</button>
       </div>
     </div>
   );

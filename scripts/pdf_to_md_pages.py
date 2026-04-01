@@ -1,9 +1,26 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import fitz
+from pdf_coverage_utils import build_coverage_report
+from pdf_layout_utils import collect_layout_payload
+from pdf_markdown_utils import CHUNK_DIR_NAME, LAYOUT_STAGE_PREFIX, MD_STAGE_PREFIX, extract_page_markdown, save_page_images, write_chunk_markdown, write_layout_json, write_merged_markdown
+from pdf_report_utils import write_report_files
+
+CHUNK_PAGE_SIZE = 10
+
+
+def emit_progress(stage: str, current: int, total: int, message: str) -> None:
+    print(json.dumps({
+        "type": "progress",
+        "stage": stage,
+        "current": current,
+        "total": total,
+        "message": message,
+    }, ensure_ascii=True), flush=True)
 
 
 def resolve_pdf_inputs(inputs: list[Path]) -> list[Path]:
@@ -26,113 +43,81 @@ def resolve_pdf_inputs(inputs: list[Path]) -> list[Path]:
     return unique_files
 
 
-def save_page_images(doc: fitz.Document, page: fitz.Page, image_dir: Path, pdf_stem: str) -> list[str]:
-    image_dir.mkdir(parents=True, exist_ok=True)
-    saved_files: list[str] = []
-
-    for image_index, img in enumerate(page.get_images(full=True), start=1):
-        xref = img[0]
-        extracted = doc.extract_image(xref)
-        ext = extracted.get("ext", "png")
-        filename = f"{pdf_stem}_{page.number + 1:03d}_{image_index:02d}.{ext}"
-        output_path = image_dir / filename
-        output_path.write_bytes(extracted["image"])
-        saved_files.append(filename)
-
-    return saved_files
-
-
-def extract_text_from_block(block: dict) -> str:
-    lines: list[str] = []
-    for line in block.get("lines", []):
-        spans = [span.get("text", "") for span in line.get("spans", [])]
-        text = "".join(spans).strip()
-        if text:
-            lines.append(text)
-    return "\n".join(lines).strip()
-
-
-def extract_page_content(page: fitz.Page, image_labels: list[str] | None = None) -> str:
-    blocks = page.get_text("dict").get("blocks", [])
-    parts: list[str] = []
-    image_index = 0
-
-    for block in blocks:
-        block_type = block.get("type")
-
-        if block_type == 0:
-            text = extract_text_from_block(block)
-            if text:
-                parts.append(text)
-        elif block_type == 1:
-            image_index += 1
-            if image_labels and image_index <= len(image_labels):
-                parts.append(f"[이미지 {image_index}: image/{image_labels[image_index - 1]}]")
-            else:
-                parts.append(f"[이미지 {image_index}]")
-
-    content = "\n\n".join(parts).strip()
-    if not content:
-        return "[텍스트를 추출하지 못했습니다. 스캔 PDF라면 OCR이 필요합니다.]"
-
-    return content
-
-
-def extract_page_markdown(
-    page: fitz.Page, page_number: int, source_name: str, image_labels: list[str] | None = None
-) -> str:
-    content = extract_page_content(page, image_labels)
-
-    return "\n".join(
-        [
-            f"# Page {page_number:03d}",
-            "",
-            f"> source: {source_name}",
-            "",
-            content,
-            "",
-        ]
-    )
-
-
-def write_merged_markdown(output_dir: Path, pdf_stem: str, page_docs: list[str], source_name: str) -> None:
-    merged_parts = [
-        f"# {pdf_stem}",
-        "",
-        f"> source: {source_name}",
-        "",
-    ]
-
-    for index, page_doc in enumerate(page_docs):
-        if index > 0:
-            merged_parts.extend(["", "---", ""])
-        merged_parts.append(page_doc)
-
-    merged_parts.append("")
-    merged_path = output_dir / f"{pdf_stem}.md"
-    merged_path.write_text("\n".join(merged_parts), encoding="utf-8")
-    print(f"written: {merged_path}")
-
-
 def convert_pdf_to_markdown_pages(
     pdf_path: Path, output_dir: Path, extract_images: bool, write_page_files: bool
 ) -> tuple[int, int]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    image_dir = output_dir / "image"
+    markdown_dir = output_dir / "md"
+    markdown_dir.mkdir(parents=True, exist_ok=True)
+    image_dir = output_dir / "img"
+    report_dir = output_dir / "report"
     page_docs: list[str] = []
+    chunk_docs: list[str] = []
+    chunk_paths: list[Path] = []
+    page_summaries: list[dict] = []
+    total_images = 0
 
     with fitz.open(pdf_path) as doc:
         total_pages = len(doc)
+        emit_progress("prepare", 0, total_pages, f"open {pdf_path.name}")
+        emit_progress("layout", 0, total_pages, "collect layout")
+        layout_payload = collect_layout_payload(doc)
+        emit_progress("layout", 0, total_pages, "layout ready")
         for index, page in enumerate(doc, start=1):
             image_labels = save_page_images(doc, page, image_dir, pdf_path.stem) if extract_images else []
-            markdown = extract_page_markdown(page, index, pdf_path.name, image_labels)
+            total_images += sum(1 for name in image_labels if name)
+            markdown = extract_page_markdown(page, image_labels)
             page_docs.append(markdown)
+            chunk_docs.append(markdown)
+            page_text = page.get_text("text").strip()
+            page_summaries.append({"page": index, "isEmpty": len(page_text) == 0, "charCount": len(page_text)})
             if write_page_files:
-                output_path = output_dir / f"{pdf_path.stem}_{index:03d}.md"
+                output_path = markdown_dir / f"{MD_STAGE_PREFIX}_{pdf_path.stem}_{index:03d}.md"
                 output_path.write_text(markdown, encoding="utf-8")
                 print(f"written: {output_path}")
+            if len(chunk_docs) == CHUNK_PAGE_SIZE or index == total_pages:
+                start_page = index - len(chunk_docs) + 1
+                chunk_index = len(chunk_paths) + 1
+                chunk_paths.append(write_chunk_markdown(output_dir, pdf_path.stem, chunk_index, start_page, index, chunk_docs))
+                emit_progress("page", index, total_pages, f"pages {start_page}-{index} done")
+                chunk_docs = []
 
-    write_merged_markdown(output_dir, pdf_path.stem, page_docs, pdf_path.name)
+    emit_progress("merge", total_pages, total_pages, "merge chunks")
+    write_merged_markdown(output_dir, pdf_path.stem, chunk_paths)
+    write_layout_json(output_dir, pdf_path.stem, layout_payload)
+    coverage = build_coverage_report(layout_payload, page_docs)
+    warnings = ["empty text page detected"] if any(page["isEmpty"] for page in page_summaries) else []
+    if coverage["missingTextBlocks"] > 0:
+        warnings.append("layout text block missing from markdown")
+    report_prefix = f"s03_{pdf_path.stem}"
+    report_files = write_report_files(report_dir, report_prefix, {
+        "title": "PDF Conversion Report",
+        "source": pdf_path.name,
+        "status": "warning" if warnings else "ok",
+        "pageCount": total_pages,
+        "summary": "Basic extraction completed for markdown, images, and layout.",
+        "warnings": warnings,
+        "metrics": {
+            "textPages": len(page_summaries),
+            "emptyTextPages": sum(1 for page in page_summaries if page["isEmpty"]),
+            "totalImages": total_images,
+            "totalBlocks": int(layout_payload.get("totalBlocks", 0)),
+            "totalShapes": int(layout_payload.get("totalShapes", 0)),
+            "totalBoxedBlocks": int(layout_payload.get("totalBoxedBlocks", 0)),
+        },
+        "coverage": coverage,
+        "artifacts": [
+            f"md/{MD_STAGE_PREFIX}_{pdf_path.stem}.md",
+            f"md/{CHUNK_DIR_NAME}",
+            "img",
+            f"layout/{LAYOUT_STAGE_PREFIX}_{pdf_path.stem}_layout.json",
+            f"report/{report_prefix}_report.json",
+            f"report/{report_prefix}_report.md",
+        ],
+    })
+    for report_file in report_files:
+        print(f"written: {report_dir / report_file}")
+    emit_progress("done", total_pages, total_pages, "conversion complete")
     return total_pages, len(page_docs)
 
 

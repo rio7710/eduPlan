@@ -70,12 +70,21 @@ function registerReviewHandlers(mainWindow) {
   ipcMain.handle('review:resolve-sentence-item', async (_event, payload) => {
     const id = String(payload?.id || '');
     const action = payload?.action === 'approve' ? 'approved' : 'rejected';
+    const approvedText = String(payload?.approvedText || '');
     if (!id) return { ok: false, error: 'invalid_id' };
-    db.prepare(`
-      UPDATE sentence_edits
-      SET review_status = ?, final_action = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(action, String(payload?.action || ''), id);
+    if (payload?.action === 'approve') {
+      db.prepare(`
+        UPDATE sentence_edits
+        SET review_status = ?, final_action = ?, after_focus = ?, edited_text = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(action, String(payload?.action || ''), approvedText, approvedText, id);
+    } else {
+      db.prepare(`
+        UPDATE sentence_edits
+        SET review_status = ?, final_action = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(action, String(payload?.action || ''), id);
+    }
     return { ok: true };
   });
 

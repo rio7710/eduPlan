@@ -126,8 +126,23 @@ type ReviewItem = LogoReviewItem | HierarchyPatternReviewItem | SentenceEditRevi
 
 interface PdfConversionResult {
   doc: ShellDocument | null;
-  reviewItems: LogoReviewItem[];
+  reviewItems: ReviewItem[];
+  reportPath?: string;
+  mlReportPath?: string;
+  txtReplaceCount?: number;
   error?: string;
+}
+
+interface PdfConvertProgress {
+  stage: 'prepare' | 'layout' | 'page' | 'merge' | 'review' | 'done';
+  current: number;
+  total: number;
+  message: string;
+  replaceMatched?: number;
+  replaceDetected?: number;
+  pairAdded?: number;
+  pairTotal?: number;
+  autoApproved?: number;
 }
 
 interface MlDatasetRunSummary {
@@ -150,6 +165,13 @@ interface MlDatasetStats {
   usedImageCount: number;
   reviewFileCount: number;
   runs: MlDatasetRunSummary[];
+  totalEdits?: number;
+  txtReferenceReplaceCount?: number;
+  autoTxtReplaceCount?: number;
+  txtChangedCount?: number;
+  lastAutoTxtReplaceAt?: string | null;
+  userLineBreakPairsCount?: number;
+  trainLineBreakPairsCount?: number;
 }
 
 interface MlDatasetActionResult {
@@ -157,9 +179,57 @@ interface MlDatasetActionResult {
   path?: string;
   zipPath?: string;
   removedDirCount?: number;
+  removedArtifactCount?: number;
+  removedDatasetFileCount?: number;
+  deletedDbRows?: number;
   freedBytes?: number;
   action?: 'upload' | 'cancel';
   error?: string;
+}
+
+interface MlDatasetPreviewRow {
+  fileName: string;
+  lineStart: number;
+  beforePreview: string;
+  afterPreview: string;
+  updatedAt: string | null;
+}
+
+interface MlDatasetPreviewPair {
+  label: string;
+  left: string;
+  right: string;
+  sourceId: string;
+}
+
+interface MlDatasetPreviewData {
+  autoTxtRows: MlDatasetPreviewRow[];
+  recentDocuments: Array<{ fileName: string; updatedAt: string | null }>;
+  userPairs: MlDatasetPreviewPair[];
+  trainPairs: MlDatasetPreviewPair[];
+}
+
+interface MlTrainingPrepareResult {
+  ok: boolean;
+  minPairs: number;
+  exportedPairCount: number;
+  exportedLabeledCount: number;
+  totalUserPairs: number;
+  lastTrainedTotal: number;
+  hasNewData: boolean;
+  eligibleForTraining: boolean;
+  trained: boolean;
+  trainResult?: {
+    userRows?: number;
+    synthRows?: number;
+    totalRows?: number;
+    trainRows?: number;
+    validRows?: number;
+    validAccuracy?: number;
+  } | null;
+  trainError?: string;
+  userPairsPath?: string;
+  labeledPairsPath?: string;
 }
 
 interface SyncStatus {
@@ -174,15 +244,21 @@ interface Window {
     getShellState: () => Promise<{ isDesktop: boolean; recentDocuments: ShellDocument[] }>;
     getSystemFonts: () => Promise<string[]>;
     getSyncStatus: () => Promise<SyncStatus>;
+    readFile: (filePath: string) => Promise<string>;
     filterExistingPaths: (paths: string[]) => Promise<string[]>;
+    openPath: (targetPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
     readImageDataUrl: (filePath: string) => Promise<string | null>;
     openFile: () => Promise<ShellDocument | null>;
     openFolder: () => Promise<OpenFolderResult | null>;
     openFolderPath: (folderPath: string, includeSubfolders?: boolean) => Promise<OpenFolderResult | null>;
     openRecent: (filePath: string) => Promise<ShellDocument | null>;
     convertPdfWithPython: (filePath: string, inferenceEngine?: 'py_only' | 'py_lgbm', sensitivity?: 'low' | 'default' | 'high') => Promise<PdfConversionResult | null>;
+    onPdfConvertProgress?: (callback: (payload: PdfConvertProgress) => void) => (() => void) | void;
     analyzeHierarchyPatterns: (markdownPath: string) => Promise<HierarchyPatternReviewItem[]>;
     getMlDatasetStats: () => Promise<MlDatasetStats>;
+    getMlDatasetPreview: () => Promise<MlDatasetPreviewData>;
+    prepareMlTraining: (minPairs?: number) => Promise<MlTrainingPrepareResult>;
+    resetAllDatasetData: () => Promise<MlDatasetActionResult>;
     openMlDatasetRoot: () => Promise<MlDatasetActionResult>;
     exportMlDatasetZip: () => Promise<MlDatasetActionResult>;
     cleanupMlDatasetArtifacts: () => Promise<MlDatasetActionResult>;
@@ -204,6 +280,7 @@ interface Window {
     resolveSentenceReviewItem: (payload: {
       id: string;
       action: 'approve' | 'reject';
+      approvedText?: string;
     }) => Promise<{ ok: boolean; error?: string }>;
     resolveLogoReviewItem: (payload: {
       id: string;

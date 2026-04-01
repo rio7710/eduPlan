@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { buildPageGroupKey, buildPageOptionLabel, buildPageRanges, getReviewItemAnchorLine, resolvePageNumber } from './reviewPageGrouping';
 
 const HIERARCHY_LABEL_OPTIONS = [
   'heading_1',
@@ -16,7 +17,11 @@ const HIERARCHY_LABEL_OPTIONS = [
 
 type Props = {
   items: ReviewItem[];
-  onResolveItem: (item: ReviewItem, action: 'approve' | 'reject') => Promise<void> | void;
+  onResolveItem: (
+    item: ReviewItem,
+    action: 'approve' | 'reject',
+    options?: { approvedText?: string },
+  ) => Promise<void> | void;
   onApproveAll: (items: ReviewItem[]) => Promise<void> | void;
   onOpenEditorItem: (item: ReviewItem) => Promise<void> | void;
 };
@@ -28,8 +33,11 @@ function toFileUrl(filePath: string) {
 
 export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorItem }: Props) {
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [pageGroup, setPageGroup] = useState('all');
   const [resolvingIds, setResolvingIds] = useState<string[]>([]);
   const [hierarchyLabels, setHierarchyLabels] = useState<Record<string, string>>({});
+  const [markdownByPath, setMarkdownByPath] = useState<Record<string, string>>({});
+  const [sentenceDrafts, setSentenceDrafts] = useState<Record<string, string>>({});
 
   const filteredItems = useMemo(() => (
     filter === 'all'
@@ -37,33 +45,119 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
       : items.filter((item) => item.status === filter)
   ), [filter, items]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const paths = [...new Set(items.map((item) => item.markdownPath).filter(Boolean))];
+    if (!paths.length || !window.eduFixerApi?.readFile) {
+      setMarkdownByPath({});
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void Promise.all(paths.map(async (path) => [path, await window.eduFixerApi?.readFile(path)] as const))
+      .then((entries) => {
+        if (cancelled) {
+          return;
+        }
+        setMarkdownByPath(Object.fromEntries(entries.map(([path, content]) => [path, content ?? ''])));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMarkdownByPath({});
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items]);
+
+  const pageGroupedItems = useMemo(() => {
+    return filteredItems.map((item) => {
+      const markdown = markdownByPath[item.markdownPath] ?? '';
+      const ranges = markdown ? buildPageRanges(markdown) : [];
+      const pageNumber = resolvePageNumber(getReviewItemAnchorLine(item), ranges);
+      return {
+        item,
+        pageNumber,
+        pageKey: buildPageGroupKey(item, pageNumber),
+        pageLabel: buildPageOptionLabel(item, pageNumber),
+      };
+    });
+  }, [filteredItems, markdownByPath]);
+
+  const pageOptions = useMemo(() => {
+    const next = new Map<string, string>();
+    pageGroupedItems.forEach(({ pageKey, pageLabel }) => {
+      if (!next.has(pageKey)) {
+        next.set(pageKey, pageLabel);
+      }
+    });
+    return [{ key: 'all', label: '전체 페이지' }, ...Array.from(next, ([key, label]) => ({ key, label }))];
+  }, [pageGroupedItems]);
+
+  useEffect(() => {
+    if (pageOptions.some((option) => option.key === pageGroup)) {
+      return;
+    }
+    setPageGroup('all');
+  }, [pageGroup, pageOptions]);
+
+  useEffect(() => {
+    setSentenceDrafts((current) => {
+      const next = { ...current };
+      items.forEach((item) => {
+        if (item.type !== 'sentence_edit' || next[item.id] != null) {
+          return;
+        }
+        next[item.id] = item.editedText || item.afterFocus || '';
+      });
+      return next;
+    });
+  }, [items]);
+
+  const visibleItems = useMemo(() => (
+    pageGroup === 'all'
+      ? pageGroupedItems
+      : pageGroupedItems.filter((entry) => entry.pageKey === pageGroup)
+  ), [pageGroup, pageGroupedItems]);
+
   const pendingItems = useMemo(
     () => items.filter((item) => item.status === 'pending'),
     [items],
   );
+  const pendingVisibleItems = useMemo(
+    () => visibleItems.map((entry) => entry.item).filter((item) => item.status === 'pending'),
+    [visibleItems],
+  );
 
-  async function handleResolve(item: ReviewItem, action: 'approve' | 'reject') {
+  async function handleResolve(
+    item: ReviewItem,
+    action: 'approve' | 'reject',
+    options?: { approvedText?: string },
+  ) {
     if (resolvingIds.includes(item.id)) {
       return;
     }
 
     setResolvingIds((current) => [...current, item.id]);
     try {
-      await onResolveItem(item, action);
+      await onResolveItem(item, action, options);
     } finally {
       setResolvingIds((current) => current.filter((value) => value !== item.id));
     }
   }
 
   async function handleApproveAll() {
-    if (!pendingItems.length) {
+    if (!pendingVisibleItems.length) {
       return;
     }
 
-    const pendingIds = pendingItems.map((item) => item.id);
+    const pendingIds = pendingVisibleItems.map((item) => item.id);
     setResolvingIds((current) => [...new Set([...current, ...pendingIds])]);
     try {
-      await onApproveAll(pendingItems);
+      await onApproveAll(pendingVisibleItems);
     } finally {
       setResolvingIds((current) => current.filter((value) => !pendingIds.includes(value)));
     }
@@ -80,12 +174,17 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
             <option value="approved">approved</option>
             <option value="rejected">rejected</option>
           </select>
-          <button className="btn btn-sm btn-ghost" onClick={handleApproveAll} disabled={!pendingItems.length}>일괄 승인</button>
+          <select className="select-sm" value={pageGroup} onChange={(event) => setPageGroup(event.target.value)}>
+            {pageOptions.map((option) => (
+              <option key={option.key} value={option.key}>{option.label}</option>
+            ))}
+          </select>
+          <button className="btn btn-sm btn-ghost" onClick={handleApproveAll} disabled={!pendingVisibleItems.length}>일괄 승인</button>
         </div>
       </div>
 
       <div className="review-content">
-        {filteredItems.length ? filteredItems.map((item) => {
+        {visibleItems.length ? visibleItems.map(({ item, pageNumber }) => {
           if (item.type === 'hierarchy_pattern') {
             const isResolving = resolvingIds.includes(item.id);
             const selectedLabel = hierarchyLabels[item.id] ?? item.finalLabel ?? item.recommendationLabel;
@@ -97,6 +196,7 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
                     <span className="action-badge keep">HIER</span>
                     <span className="review-engine-badge py">PY</span>
                     <span className="review-doc">{item.sourcePdfName}</span>
+                    <span className="review-time">{pageNumber ? `p${pageNumber}` : '기타'}</span>
                     <span className="review-time">{item.createdAt.slice(0, 16).replace('T', ' ')}</span>
                   </div>
                   <div className="review-score">
@@ -193,6 +293,8 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
           if (item.type === 'sentence_edit') {
             const isResolving = resolvingIds.includes(item.id);
             const scoreClass = item.qualityScore >= 0.85 ? 'high' : item.qualityScore >= 0.7 ? 'mid' : 'low';
+            const suggestedText = sentenceDrafts[item.id] ?? item.editedText ?? item.afterFocus ?? '';
+            const isModified = suggestedText.trim() !== (item.afterFocus || '').trim();
             return (
               <div key={item.id} className="review-card">
                 <div className="review-card-header">
@@ -200,6 +302,7 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
                     <span className="action-badge keep">TEXT</span>
                     <span className="review-engine-badge py">PY</span>
                     <span className="review-doc">{item.sourcePdfName}</span>
+                    <span className="review-time">{pageNumber ? `p${pageNumber}` : '기타'}</span>
                     <span className="review-time">{item.createdAt.slice(0, 16).replace('T', ' ')}</span>
                   </div>
                   <div className="review-score">
@@ -217,11 +320,19 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
                     </div>
                     <div className="review-preview-box">
                       <div className="review-preview-label">수정 focus</div>
-                      <div className="review-preview-text">{item.afterFocus}</div>
+                      <textarea
+                        className="review-edit-textarea"
+                        value={suggestedText}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setSentenceDrafts((current) => ({ ...current, [item.id]: value }));
+                        }}
+                        disabled={isResolving || item.status !== 'pending'}
+                      />
                     </div>
                     <div className="review-preview-box">
                       <div className="review-preview-label">컨텍스트</div>
-                      <div className="review-preview-text">{`${item.leftContext} [${item.beforeFocus} -> ${item.afterFocus}] ${item.rightContext}`.trim()}</div>
+                      <div className="review-preview-text">{`${item.leftContext} [${item.beforeFocus} -> ${suggestedText}] ${item.rightContext}`.trim()}</div>
                     </div>
                     <div className="review-preview-box">
                       <div className="review-preview-label">Diff</div>
@@ -265,7 +376,13 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
                     에디트 이동
                   </button>
                   <button className="btn btn-danger btn-sm" onClick={() => handleResolve(item, 'reject')} disabled={isResolving || item.status !== 'pending'}>거부</button>
-                  <button className="btn btn-success btn-sm" onClick={() => handleResolve(item, 'approve')} disabled={isResolving || item.status !== 'pending'}>승인</button>
+                  <button
+                    className={`btn btn-sm ${isModified ? 'btn-primary' : 'btn-success'}`}
+                    onClick={() => handleResolve(item, 'approve', { approvedText: suggestedText })}
+                    disabled={isResolving || item.status !== 'pending'}
+                  >
+                    {isModified ? '수정승인' : '승인'}
+                  </button>
                 </div>
               </div>
             );
@@ -285,6 +402,7 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
                   <span className={`review-engine-badge ${recommendationSource.toLowerCase().replace('&', '-')}`}>{recommendationSource}</span>
                   <span className="review-ml-badge">{`ML ${mlPercent}%`}</span>
                   <span className="review-doc">{item.sourcePdfName}</span>
+                  <span className="review-time">{pageNumber ? `p${pageNumber}` : '기타'}</span>
                   <span className="review-time">{(item.createdAt || '').slice(0, 16).replace('T', ' ')}</span>
                 </div>
                 <div className="review-score">

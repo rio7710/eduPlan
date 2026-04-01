@@ -7,6 +7,12 @@ description: Apply EduFixer-specific working rules, formatting standards, and lo
 
 Use this skill together with the repository `AGENTS.md`.
 
+## Priority 0 Rules
+
+1. Keep every document, code file, skill file, agent guide, and lint-related rule file at 200 lines or fewer when practical.
+2. If a file would exceed 200 lines, split it and manage it through a short index file.
+3. If a decision is ambiguous and the safer choice is not obvious from repo context, stop and ask the user before deciding.
+
 ## Workflow
 
 1. Read `AGENTS.md` at the repo root before editing.

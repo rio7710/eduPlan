@@ -1,3 +1,6 @@
+import { useCallback, useState } from 'react';
+import { DatasetDataModal } from './DatasetDataModal';
+
 const cleanupRules = [
   '기본은 로컬 데이터 유지',
   '서버 이관 예약은 SQLite 큐에만 적재',
@@ -7,10 +10,22 @@ const cleanupRules = [
 type Props = {
   stats: MlDatasetStats | null;
   syncStatus: SyncStatus | null;
+  report: {
+    changedPages?: number;
+    pageCount?: number;
+    avgSimilarity?: number;
+    pages?: Array<{
+      page: number;
+      similarity: number;
+      rawPreview: string[];
+      referencePreview: string[];
+    }>;
+  } | null;
   onOpenRoot: () => void;
   onExportZip: () => void;
   onQueueUpload: () => void;
   onOpenTrainingAccess: () => void;
+  onResetAllData: () => void;
 };
 
 function formatBytes(bytes: number) {
@@ -43,7 +58,26 @@ function formatDateTime(value: string | null) {
   });
 }
 
-export function DatasetView({ stats, syncStatus, onOpenRoot, onExportZip, onQueueUpload, onOpenTrainingAccess }: Props) {
+export function DatasetView({ stats, syncStatus, report, onOpenRoot, onExportZip, onQueueUpload, onOpenTrainingAccess, onResetAllData }: Props) {
+  const [isDataModalOpen, setIsDataModalOpen] = useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<MlDatasetPreviewData | null>(null);
+
+  const refreshPreviewData = useCallback(async () => {
+    setIsPreviewLoading(true);
+    try {
+      const payload = await window.eduFixerApi?.getMlDatasetPreview();
+      setPreviewData(payload ?? null);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  }, []);
+
+  const openDataModal = useCallback(async () => {
+    setIsDataModalOpen(true);
+    await refreshPreviewData();
+  }, [refreshPreviewData]);
+
   const storageBuckets = [
     { label: '원본 이미지', value: `${stats?.imageCount ?? 0}개`, meta: formatBytes(stats?.totalSizeBytes ?? 0), tone: 'primary' },
     { label: '라벨 매니페스트', value: 'labels.jsonl', meta: `${stats?.labelsCount ?? 0}개`, tone: 'neutral' },
@@ -57,6 +91,8 @@ export function DatasetView({ stats, syncStatus, onOpenRoot, onExportZip, onQueu
         <span className="breadcrumb">ML Dataset</span>
         <div className="view-header-actions">
           <button className="btn btn-sm btn-ghost" onClick={onOpenTrainingAccess}>학습 시키기</button>
+          <button className="btn btn-sm btn-ghost" onClick={openDataModal}>데이터 보기</button>
+          <button className="btn btn-sm btn-ghost" onClick={onResetAllData}>전체 초기화</button>
           <button className="btn btn-sm btn-ghost" onClick={onOpenRoot}>저장 위치 열기</button>
           <button className="btn btn-sm btn-ghost" onClick={onExportZip}>ZIP 내보내기</button>
           <button className="btn btn-sm btn-primary" onClick={onQueueUpload}>서버 이관 예약</button>
@@ -125,7 +161,32 @@ export function DatasetView({ stats, syncStatus, onOpenRoot, onExportZip, onQueu
                 <span className="dataset-action-title">저장소 열기</span>
                 <span className="dataset-action-desc">중앙 ml-dataset 폴더를 탐색기에서 바로 열어 현재 파일 상태를 확인</span>
               </button>
+              <button className="dataset-action-card" onClick={onResetAllData}>
+                <span className="dataset-action-title">DB/학습데이터 전체 초기화</span>
+                <span className="dataset-action-desc">SQLite 승인 데이터, ML artifacts, user ml-dataset을 모두 초기화합니다.</span>
+              </button>
             </div>
+          </div>
+        </section>
+
+        <section className="dataset-section-card">
+          <div className="dataset-section-title">TXT 비교 ML 레포트</div>
+          <div className="dataset-policy-list">
+            <div className="dataset-summary-item"><span className="sync-dot online" /> TXT 자동승인 {stats?.autoTxtReplaceCount ?? 0}건 (변경 {stats?.txtChangedCount ?? 0}건)</div>
+            <div className="dataset-summary-item"><span className="sync-dot online" /> sentence_edits 누적 {stats?.totalEdits ?? 0}건</div>
+            <div className="dataset-summary-item"><span className="sync-dot online" /> user_line_break_pairs {stats?.userLineBreakPairsCount ?? 0}줄</div>
+            <div className="dataset-summary-item"><span className="sync-dot online" /> line_break_train {stats?.trainLineBreakPairsCount ?? 0}줄</div>
+            <div className="dataset-summary-item"><span className="sync-dot online" /> 최근 자동승인 {formatDateTime(stats?.lastAutoTxtReplaceAt ?? null)}</div>
+            <div className="dataset-summary-item"><span className="sync-dot pending" /> 변경 페이지 {report?.changedPages ?? 0}/{report?.pageCount ?? 0}</div>
+            <div className="dataset-summary-item"><span className="sync-dot online" /> 평균 유사도 {Math.round((report?.avgSimilarity ?? 0) * 100)}%</div>
+            {(report?.pages ?? []).slice(0, 5).map((page) => (
+              <div key={page.page} className="dataset-policy-item">
+                p{page.page} · {Math.round(page.similarity * 100)}% · RAW {page.rawPreview.join(' / ') || '-'} · REF {page.referencePreview.join(' / ') || '-'}
+              </div>
+            ))}
+            {!report?.pages?.length ? (
+              <div className="dataset-policy-item">최근 변환 기준 TXT 비교 레포트가 아직 없습니다.</div>
+            ) : null}
           </div>
         </section>
 
@@ -172,6 +233,13 @@ export function DatasetView({ stats, syncStatus, onOpenRoot, onExportZip, onQueu
           </div>
         </section>
       </div>
+      <DatasetDataModal
+        isOpen={isDataModalOpen}
+        loading={isPreviewLoading}
+        preview={previewData}
+        onRefresh={refreshPreviewData}
+        onClose={() => setIsDataModalOpen(false)}
+      />
     </>
   );
 }

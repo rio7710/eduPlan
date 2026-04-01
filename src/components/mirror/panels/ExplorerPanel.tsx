@@ -6,6 +6,7 @@ import { getFileIcon, getFileIconClass } from '@/utils/fileIcon';
 type Props = {
   onOpenView: (view: ViewId, tabId?: string) => void;
   onOpenFolder: () => void;
+  onOpenExplorerFolderPath: (folderPath: string) => void;
   onOpenExplorerFile: (entry: FolderEntry | ShellDocument) => void;
   onDeleteExplorerFile: (entry: FolderEntry | ShellDocument) => void;
   includeSubfolders: boolean;
@@ -46,6 +47,7 @@ function splitEntryPath(name: string) {
 export function ExplorerPanel({
   onOpenView,
   onOpenFolder,
+  onOpenExplorerFolderPath,
   onOpenExplorerFile,
   onDeleteExplorerFile,
   includeSubfolders,
@@ -148,6 +150,9 @@ export function ExplorerPanel({
           </DelayedTooltip>
           <DelayedTooltip content="폴더 열기">
             <button className="icon-btn" onClick={onOpenFolder}>📁</button>
+          </DelayedTooltip>
+          <DelayedTooltip content="탐색기로 보기">
+            <button className="icon-btn" onClick={() => explorerFolder?.path && onOpenExplorerFolderPath(explorerFolder.path)} disabled={!explorerFolder?.path}>↗</button>
           </DelayedTooltip>
         </div>
       </div>
@@ -266,7 +271,7 @@ export function ExplorerPanel({
               tabIndex={0}
               onClick={onOpenUnimplementedModal}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
+                if (event.key === 'Enter') {
                   event.preventDefault();
                   onOpenUnimplementedModal();
                 }

@@ -4,6 +4,7 @@ const { registerOpenRecentHandler } = require('./document/openRecent.cjs');
 const { registerSaveDocumentHandler } = require('./document/saveDocument.cjs');
 const { registerSaveAsDocumentHandler } = require('./document/saveAsDocument.cjs');
 const { registerConvertPdfPythonHandler } = require('./document/convertPdfPython.cjs');
+const { registerRunPdfExtractStageHandler } = require('./document/runPdfExtractStage.cjs');
 const { registerAnalyzeHierarchyHandler } = require('./document/analyzeHierarchy.cjs');
 const { registerDeletePathHandler } = require('./document/deletePath.cjs');
 
@@ -13,6 +14,7 @@ function registerDocumentHandlers(mainWindow) {
   registerSaveDocumentHandler(ipcMain, mainWindow, db);
   registerSaveAsDocumentHandler(ipcMain, mainWindow, db);
   registerConvertPdfPythonHandler(ipcMain, db);
+  registerRunPdfExtractStageHandler(ipcMain);
   registerAnalyzeHierarchyHandler(ipcMain);
   registerDeletePathHandler(ipcMain);
 }
