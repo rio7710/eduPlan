@@ -37,7 +37,7 @@ type UseAppCommandsParams = {
   handleOpenFolder: () => void | Promise<void>;
   handleSaveCurrentDocument: () => void | Promise<void>;
   handleSaveAsCurrentDocument: () => void | Promise<void>;
-  setActivePanel: Dispatch<SetStateAction<'explorer' | 'md-menu' | 'search' | 'review' | 'dataset' | 'settings'>>;
+  setActivePanel: Dispatch<SetStateAction<'explorer' | 'md-menu' | 'search' | 'report' | 'review' | 'dataset' | 'settings'>>;
   setSearchPanelState: Dispatch<SetStateAction<{ mode: SearchMode; scope: 'document' | 'folder'; query: string; replaceValue: string; selectedIndex: number }>>;
   setActiveView: Dispatch<SetStateAction<'welcome' | 'upload' | 'editor' | 'review' | 'dataset' | 'settings'>>;
   locationSurface: LocationSurface;

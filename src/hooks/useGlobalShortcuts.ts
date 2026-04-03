@@ -12,6 +12,7 @@ type UseGlobalShortcutsParams = {
   onRedo: () => void;
   onFind: () => void;
   onReplace: () => void;
+  onClearSelection?: () => void;
 };
 
 export function useGlobalShortcuts({
@@ -26,6 +27,7 @@ export function useGlobalShortcuts({
   onRedo,
   onFind,
   onReplace,
+  onClearSelection,
 }: UseGlobalShortcutsParams) {
   const handleKeyDownEvent = useEffectEvent((event: KeyboardEvent) => {
     if (event.isComposing) {
@@ -94,6 +96,11 @@ export function useGlobalShortcuts({
     if (key === 'h' && !event.shiftKey) {
       event.preventDefault();
       onReplace();
+      return;
+    }
+
+    if (key === 'escape') {
+      onClearSelection?.();
     }
   });
 
