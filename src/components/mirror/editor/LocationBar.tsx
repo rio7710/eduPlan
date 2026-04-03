@@ -1,6 +1,15 @@
 import type { EditorMode, PreviewSelectionMode } from '@/App';
 import { getCollapsedHeadingOwnerLine } from '@/lib/headingSections';
+import { writePreviewClipboard } from '@/utils/previewClipboardWrite';
 import { getFileIcon, getFileIconClass } from '@/utils/fileIcon';
+import {
+  collectSiblingGroup,
+  collectSiblingHeadings,
+  extractHeadings,
+  getHeadingTrail,
+  truncateLabel,
+} from '@/components/mirror/editor/locationBarSections';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type Props = {
   document: ShellDocument | null;
@@ -16,53 +25,8 @@ type Props = {
   actionDisabled?: boolean;
   renderSyncMode?: 'sync' | 'async';
   onToggleRenderSyncMode?: (() => void) | null;
+  onSelectLocationLine?: ((lineNumber: number) => void) | null;
 };
-
-type HeadingItem = {
-  level: number;
-  text: string;
-  lineNumber: number;
-};
-
-function extractHeadings(content: string) {
-  return content
-    .split(/\r?\n/)
-    .map((line, index) => ({ line, index }))
-    .map(({ line, index }) => {
-      const match = line.match(/^(#{1,6})\s+(.+)$/);
-      if (!match) {
-        return null;
-      }
-      return {
-        level: match[1].length,
-        text: match[2].trim(),
-        lineNumber: index + 1,
-      };
-    })
-    .filter((item): item is HeadingItem => Boolean(item));
-}
-
-function getHeadingTrail(content: string, activeLine: number | null) {
-  if (!activeLine) {
-    return [];
-  }
-
-  const headings = extractHeadings(content);
-  const trail: HeadingItem[] = [];
-
-  headings.forEach((heading) => {
-    if (heading.lineNumber > activeLine) {
-      return;
-    }
-
-    while (trail.length && trail[trail.length - 1]!.level >= heading.level) {
-      trail.pop();
-    }
-    trail.push(heading);
-  });
-
-  return trail;
-}
 
 export function LocationBar({
   document,
@@ -77,39 +41,108 @@ export function LocationBar({
   actionDisabled = false,
   renderSyncMode = 'sync',
   onToggleRenderSyncMode = null,
+  onSelectLocationLine = null,
 }: Props) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [openLine, setOpenLine] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; line: number } | null>(null);
   const fileName = document?.fileName ?? '문서 제목.md';
+  const displayFileName = truncateLabel(fileName, 12);
+  const headings = useMemo(() => extractHeadings(document?.content ?? ''), [document?.content]);
   const normalizedLine = getCollapsedHeadingOwnerLine(
     document?.content ?? '',
     activeLine ?? null,
     collapsedHeadingLines,
   );
-  const headingTrail = getHeadingTrail(document?.content ?? '', normalizedLine);
-  const displayTrail =
-    headingTrail.length > 1 && headingTrail[0]?.level === 1
-      ? headingTrail.slice(1)
-      : headingTrail;
+  const headingTrail = getHeadingTrail(headings, normalizedLine);
   const surfaceLabel =
     surface === 'Render'
       ? 'Render'
       : (surface ?? 'Render');
+  useEffect(() => {
+    const handleWindowMouseDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpenLine(null);
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener('mousedown', handleWindowMouseDown);
+    return () => window.removeEventListener('mousedown', handleWindowMouseDown);
+  }, []);
 
   return (
-    <div className="location-bar" id="location-bar">
-      <span className="loc-item loc-doc"><span className={`breadcrumb-icon ${getFileIconClass(fileName)}`}>{getFileIcon(fileName)}</span> <span id="loc-doc-name">{fileName}</span></span>
-      {displayTrail.map((heading, index) => (
+    <div className="location-bar" id="location-bar" ref={rootRef}>
+      <span className="loc-item loc-doc" title={fileName}><span className={`breadcrumb-icon ${getFileIconClass(fileName)}`}>{getFileIcon(fileName)}</span> <span id="loc-doc-name">{displayFileName}</span></span>
+      {headingTrail.map((heading, index) => (
         <span key={`${heading.lineNumber}-${heading.level}-${heading.text}-${index}`} style={{ display: 'contents' }}>
           <span className="loc-sep">›</span>
-          <span
-            className={`loc-item ${index === displayTrail.length - 1 ? 'loc-block' : ''}`.trim()}
-            style={{ color: `var(--preview-h${Math.min(heading.level, 6)}-color)` }}
-          >
-            {heading.text}
+          <span className="loc-node-wrap">
+            <button
+              type="button"
+              className={`loc-item loc-node ${index === headingTrail.length - 1 ? 'loc-block' : ''}`.trim()}
+              style={{ color: `var(--preview-h${Math.min(heading.level, 6)}-color)` }}
+              onClick={() => {
+                const siblings = collectSiblingHeadings(headings, heading);
+                if (!siblings.length) {
+                  onSelectLocationLine?.(heading.lineNumber);
+                  setOpenLine(null);
+                  return;
+                }
+                setOpenLine((current) => (current === heading.lineNumber ? null : heading.lineNumber));
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setOpenLine(null);
+                setContextMenu({ x: event.clientX, y: event.clientY, line: heading.lineNumber });
+              }}
+            >
+              {heading.text}
+            </button>
+            {openLine === heading.lineNumber ? (
+              <div className="loc-children-menu">
+                {collectSiblingHeadings(headings, heading).map((sibling) => (
+                  <button
+                    key={`sibling-${sibling.lineNumber}`}
+                    type="button"
+                    className="loc-children-item"
+                    onClick={() => {
+                      onSelectLocationLine?.(sibling.lineNumber);
+                      setOpenLine(null);
+                    }}
+                  >
+                    {sibling.text}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </span>
         </span>
       ))}
       <span className="loc-sep">›</span>
       <span className="loc-item loc-surface-badge" id="loc-surface">{surfaceLabel}</span>
+      {contextMenu ? (
+        <div className="loc-context-menu" style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}>
+          <button
+            type="button"
+            className="loc-context-item"
+            onClick={() => {
+              const target = headings.find((item) => item.lineNumber === contextMenu.line);
+              if (!target) {
+                setContextMenu(null);
+                return;
+              }
+              const text = collectSiblingGroup(headings, target)
+                .map((item) => item.text)
+                .filter(Boolean)
+                .join('\n');
+              void writePreviewClipboard({ plain: text });
+              setContextMenu(null);
+            }}
+          >
+            타이틀 복사
+          </button>
+        </div>
+      ) : null}
       <div className="loc-right">
         {editorMode === 'render' && onToggleRenderSyncMode ? (
           <button className="secondary-button location-inline-action location-sync-toggle" onClick={onToggleRenderSyncMode}>

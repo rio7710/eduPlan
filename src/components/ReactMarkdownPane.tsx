@@ -376,56 +376,83 @@ function ReactMarkdownPaneComponent({
     }
 
     const range = selection.getRangeAt(0);
-    const startNode = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
-    const endNode = range.endContainer instanceof Element ? range.endContainer : range.endContainer.parentElement;
-    const startTable = startNode?.closest<HTMLElement>('[data-preview-table-root="true"]') ?? null;
-    const endTable = endNode?.closest<HTMLElement>('[data-preview-table-root="true"]') ?? null;
-    const sameTable = startTable && endTable && startTable === endTable ? startTable : null;
-
-    let firstTarget: HTMLElement | null = null;
-    let lastTarget: HTMLElement | null = null;
-
-    if (sameTable) {
-      const startRow = startNode?.closest<HTMLElement>('[data-preview-table-row="true"]') ?? null;
-      const endRow = endNode?.closest<HTMLElement>('[data-preview-table-row="true"]') ?? null;
-      const rowTargets = Array.from(sameTable.querySelectorAll<HTMLElement>('[data-preview-table-row="true"]'));
-      if (!startRow || !endRow) {
-        firstTarget = sameTable;
-        lastTarget = sameTable;
-      } else {
-        const startIndex = rowTargets.indexOf(startRow);
-        const endIndex = rowTargets.indexOf(endRow);
-        if (startIndex < 0 || endIndex < 0) {
-          return;
-        }
-        [firstTarget, lastTarget] =
-          startIndex <= endIndex ? [startRow, endRow] : [endRow, startRow];
-      }
-    } else {
-      const startRoot =
-        startTable
-        ?? startNode?.closest<HTMLElement>('[data-preview-select-root="true"]')
-        ?? null;
-      const endRoot =
-        endTable
-        ?? endNode?.closest<HTMLElement>('[data-preview-select-root="true"]')
-        ?? null;
-
-      if (!startRoot || !endRoot || !container.contains(startRoot) || !container.contains(endRoot)) {
-        return;
-      }
-
-      const roots = Array.from(container.querySelectorAll<HTMLElement>('[data-preview-select-root="true"]'));
-      const startIndex = roots.indexOf(startRoot);
-      const endIndex = roots.indexOf(endRoot);
-      if (startIndex < 0 || endIndex < 0) {
-        return;
-      }
-
-      [firstTarget, lastTarget] =
-        startIndex <= endIndex ? [startRoot, endRoot] : [endRoot, startRoot];
+    const startElement =
+      range.startContainer instanceof Element
+        ? range.startContainer
+        : range.startContainer.parentElement ?? null;
+    const endElement =
+      range.endContainer instanceof Element
+        ? range.endContainer
+        : range.endContainer.parentElement ?? null;
+    if (!startElement || !endElement) {
+      return;
     }
-
+    const startLineTarget = startElement.closest<HTMLElement>('[data-preview-line-target="true"]');
+    const endLineTarget = endElement.closest<HTMLElement>('[data-preview-line-target="true"]');
+    if (!startLineTarget || !endLineTarget || !container.contains(startLineTarget) || !container.contains(endLineTarget)) {
+      return;
+    }
+    if (startLineTarget === endLineTarget) {
+      const childNodes = Array.from(startLineTarget.childNodes);
+      const brIndexes = childNodes
+        .map((node, index) => (node.nodeName === 'BR' ? index : -1))
+        .filter((index) => index >= 0);
+      if (brIndexes.length > 0) {
+        const intervals: Array<{ start: number; end: number }> = [];
+        let startOffset = 0;
+        for (const brIndex of brIndexes) {
+          if (startOffset < brIndex) {
+            intervals.push({ start: startOffset, end: brIndex });
+          }
+          startOffset = brIndex + 1;
+        }
+        if (startOffset < childNodes.length) {
+          intervals.push({ start: startOffset, end: childNodes.length });
+        }
+        if (intervals.length > 0) {
+          const pointToIntervalIndex = (node: Node, offset: number) => {
+            for (let i = 0; i < intervals.length; i += 1) {
+              const interval = intervals[i]!;
+              const rangeForLine = document.createRange();
+              rangeForLine.setStart(startLineTarget, interval.start);
+              rangeForLine.setEnd(startLineTarget, interval.end);
+              try {
+                if (rangeForLine.isPointInRange(node, offset)) {
+                  return i;
+                }
+              } catch {
+                // ignore out-of-scope point errors
+              }
+            }
+            return -1;
+          };
+          const startInterval = pointToIntervalIndex(range.startContainer, range.startOffset);
+          const endInterval = pointToIntervalIndex(range.endContainer, range.endOffset);
+          if (startInterval >= 0 && endInterval >= 0) {
+            const [fromIndex, toIndex] =
+              startInterval <= endInterval ? [startInterval, endInterval] : [endInterval, startInterval];
+            const firstInterval = intervals[fromIndex]!;
+            const lastInterval = intervals[toIndex]!;
+            const expandedRange = document.createRange();
+            expandedRange.setStart(startLineTarget, firstInterval.start);
+            expandedRange.setEnd(startLineTarget, lastInterval.end);
+            selection.removeAllRanges();
+            selection.addRange(expandedRange);
+            return;
+          }
+        }
+      }
+    }
+    const lineTargets = Array.from(container.querySelectorAll<HTMLElement>('[data-preview-line-target="true"]'));
+    const startIndex = lineTargets.indexOf(startLineTarget);
+    const endIndex = lineTargets.indexOf(endLineTarget);
+    if (startIndex < 0 || endIndex < 0) {
+      return;
+    }
+    const [fromIndex, toIndex] =
+      startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+    const firstTarget = lineTargets[fromIndex] ?? null;
+    const lastTarget = lineTargets[toIndex] ?? null;
     if (!firstTarget || !lastTarget) {
       return;
     }
@@ -435,7 +462,6 @@ function ReactMarkdownPaneComponent({
     expandedRange.setEndAfter(lastTarget);
     selection.removeAllRanges();
     selection.addRange(expandedRange);
-
   }
 
   function handleCopy(event: ClipboardEvent<HTMLDivElement>) {

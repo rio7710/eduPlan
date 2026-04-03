@@ -1995,7 +1995,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   color: var(--muted);
   font-size: 13px;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible;
+  position: relative;
+  z-index: 50;
 }
 .loc-item {
   display: inline-flex;
@@ -2003,6 +2005,71 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   gap: 6px;
   min-width: 0;
   flex-shrink: 0;
+}
+.loc-node-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.loc-node {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.loc-children-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 180px;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 92%, var(--bg-tertiary));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  padding: 4px;
+}
+.loc-children-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.loc-children-item:hover {
+  background: var(--bg-hover);
+}
+.loc-context-menu {
+  position: fixed;
+  z-index: 220;
+  min-width: 220px;
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 95%, var(--bg-tertiary));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+  padding: 4px;
+}
+.loc-context-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  text-align: left;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  padding: 7px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.loc-context-item:hover {
+  background: var(--bg-hover);
 }
 .loc-doc {
   max-width: min(36vw, 420px);
@@ -2067,9 +2134,17 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   min-height: 0;
   display: flex;
 }
-.cm-theme, .cm-editor, .preview-pane, .wysiwyg-editor, .empty-stage { height: 100%; min-height: 0; }
+.cm-theme, .cm-editor, .preview-pane, .wysiwyg-editor, .empty-stage {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
 .cm-editor { font-size: 14px; }
-.cm-editor .cm-scroller { overflow: auto !important; }
+.cm-editor .cm-scroller {
+  overflow: auto !important;
+  scrollbar-gutter: stable;
+}
 .status-toggle {
   padding: 0 4px;
   border-radius: 4px;
@@ -2139,7 +2214,13 @@ body.light-theme .status-toggle:hover {
 .recent-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .recent-badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; flex-shrink: 0; }
 .recent-badge.synced { background: rgba(78,201,176,0.15); color: var(--success); }
-.preview-pane { overflow: auto; padding: 24px 30px 48px; line-height: 1.7; min-height: 0; }
+.preview-pane {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 24px 30px 48px;
+  line-height: 1.7;
+  min-height: 0;
+}
 .editor-split-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
@@ -2167,6 +2248,7 @@ body.light-theme .status-toggle:hover {
 .editor-split-pane .cm-editor .cm-scroller {
   height: 100%;
   overflow: auto !important;
+  scrollbar-gutter: stable;
 }
 .editor-split-divider {
   width: 1px;
@@ -2713,7 +2795,13 @@ body.light-theme .status-toggle:hover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
   transform: translate(0, -100%);
 }
-.wysiwyg-editor { overflow: auto; padding: 24px 30px 48px; outline: none; min-height: 0; }
+.wysiwyg-editor {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 24px 30px 48px;
+  outline: none;
+  min-height: 0;
+}
 .wysiwyg-editor .ProseMirror { min-height: 100%; outline: none; line-height: 1.7; }
 .wysiwyg-editor .ProseMirror p { margin: 0 0 16px; }
 .wysiwyg-editor .ProseMirror img { display: block; max-width: 100%; height: auto; margin: 12px 0; border-radius: 8px; }
@@ -3006,6 +3094,27 @@ body.light-theme .dataset-action-card:hover {
   bottom: 0;
   z-index: 2;
   box-shadow: 0 -8px 18px color-mix(in srgb, var(--bg) 60%, transparent);
+}
+
+#panel-report {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#panel-report .panel-header {
+  flex-shrink: 0;
+}
+
+#panel-report .panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 2px;
 }
 
 body.light-theme .dataset-hero-card {

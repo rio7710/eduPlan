@@ -859,6 +859,7 @@ export function App() {
                 actionDisabled={!currentDocument?.filePath}
                 renderSyncMode={renderSyncMode}
                 onToggleRenderSyncMode={toggleRenderSyncMode}
+                onSelectLocationLine={(lineNumber) => navigateToDocumentLine(lineNumber, { selectPreviewLine: false })}
               />
             </div>
 

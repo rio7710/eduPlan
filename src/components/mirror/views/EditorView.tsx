@@ -46,6 +46,7 @@ type Props = {
   actionDisabled?: boolean;
   renderSyncMode?: 'sync' | 'async';
   onToggleRenderSyncMode?: (() => void) | null;
+  onSelectLocationLine?: ((lineNumber: number) => void) | null;
 };
 
 const turndown = new TurndownService();
@@ -242,6 +243,7 @@ export function EditorView({
   actionDisabled = false,
   renderSyncMode = 'sync',
   onToggleRenderSyncMode = null,
+  onSelectLocationLine = null,
 }: Props) {
   const content = document?.content ?? '';
   const htmlContent = useMemo(() => {
@@ -337,6 +339,7 @@ export function EditorView({
         actionDisabled={actionDisabled}
         renderSyncMode={renderSyncMode}
         onToggleRenderSyncMode={onToggleRenderSyncMode}
+        onSelectLocationLine={onSelectLocationLine}
       />
       {editorMode === 'wysiwyg' ? (
         <div
