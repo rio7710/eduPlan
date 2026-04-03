@@ -27,19 +27,54 @@ def _should_keep_image(page_number: int, image_index: int, width: int, height: i
     return True
 
 
+def _sorted_page_blocks(page: fitz.Page) -> list[dict]:
+    return sorted(
+        page.get_text("dict").get("blocks", []),
+        key=lambda block: (
+            round(float(block.get("bbox", (0, 0, 0, 0))[1]), 1),
+            round(float(block.get("bbox", (0, 0, 0, 0))[0]), 1),
+        ),
+    )
+
+
+def _is_image_label_part(value: str) -> bool:
+    stripped = value.strip()
+    return stripped.startswith("[이미지 ") and stripped.endswith("]")
+
+
+def _is_source_part(value: str) -> bool:
+    return value.strip().startswith("출처 :")
+
+
+def _normalize_part_order(parts: list[str]) -> list[str]:
+    normalized = list(parts)
+    for index in range(1, len(normalized)):
+        if _is_source_part(normalized[index]) and _is_image_label_part(normalized[index - 1]):
+            normalized[index - 1], normalized[index] = normalized[index], normalized[index - 1]
+    return normalized
+
+
 def save_page_images(doc: fitz.Document, page: fitz.Page, image_dir: Path, pdf_stem: str) -> list[str | None]:
+    del doc
     image_dir.mkdir(parents=True, exist_ok=True)
     saved_files: list[str | None] = []
-    for image_index, img in enumerate(page.get_images(full=True), start=1):
-        extracted = doc.extract_image(img[0])
-        width = int(extracted.get("width", 0) or 0)
-        height = int(extracted.get("height", 0) or 0)
+    image_index = 0
+    for block in _sorted_page_blocks(page):
+        if block.get("type") != 1:
+            continue
+        image_index += 1
+        width = int(block.get("width", 0) or 0)
+        height = int(block.get("height", 0) or 0)
         if not _should_keep_image(page.number + 1, image_index, width, height):
             saved_files.append(None)
             continue
-        ext = extracted.get("ext", "png")
+        ext = str(block.get("ext", "png") or "png")
+        image_bytes = block.get("image")
+        if not isinstance(image_bytes, (bytes, bytearray)) or len(image_bytes) == 0:
+            saved_files.append(None)
+            continue
         filename = f"{MD_STAGE_PREFIX}_{pdf_stem}_{page.number + 1:03d}_{image_index:02d}.{ext}"
-        (image_dir / filename).write_bytes(extracted["image"])
+        (image_dir / filename).write_bytes(bytes(image_bytes))
         saved_files.append(filename)
     return saved_files
 
@@ -47,14 +82,7 @@ def save_page_images(doc: fitz.Document, page: fitz.Page, image_dir: Path, pdf_s
 def extract_page_content(page: fitz.Page, image_labels: list[str | None] | None = None) -> str:
     parts: list[str] = []
     image_index = 0
-    blocks = sorted(
-        page.get_text("dict").get("blocks", []),
-        key=lambda block: (
-            round(float(block.get("bbox", (0, 0, 0, 0))[1]), 1),
-            round(float(block.get("bbox", (0, 0, 0, 0))[0]), 1),
-        ),
-    )
-    for block in blocks:
+    for block in _sorted_page_blocks(page):
         block_type = block.get("type")
         if block_type == 0:
             text = extract_text_from_block(block)
@@ -66,7 +94,7 @@ def extract_page_content(page: fitz.Page, image_labels: list[str | None] | None 
                 image_name = image_labels[image_index - 1]
                 if image_name:
                     parts.append(f"[이미지 {image_index}: image/{image_name}]")
-    content = "\n\n".join(parts).strip()
+    content = "\n\n".join(_normalize_part_order(parts)).strip()
     return content or "[텍스트를 추출하지 못했습니다. 스캔 PDF라면 OCR이 필요합니다.]"
 
 

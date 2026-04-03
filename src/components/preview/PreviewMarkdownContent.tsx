@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 
 const IMAGE_LABEL_RE = /^\[이미지\s+\d+:\s*([^\]]+)\]\s*$/;
 const IMAGE_LABEL_CAPTURE_RE = /\[이미지\s+\d+:\s*([^\]]+)\]/g;
+const NUMBER_HIERARCHY_LEADER_RE = /^(?:[①-⑳㉑-㉟㊱-㊿⓵-⓾]|\(?\d+\)?[.)])\s*/;
 
 type HeadingLine = {
   level: number;
@@ -59,6 +60,22 @@ function buildPreviewMarkdown(markdownText: string) {
 
 function getNodeLine(node: { position?: { start?: { line?: number } } } | undefined) {
   return node?.position?.start?.line;
+}
+
+function resolveHeadingAnchorLevel(headingLines: HeadingLine[], lineNumber: number | undefined) {
+  if (!lineNumber) {
+    return null;
+  }
+  const match = [...headingLines].reverse().find((item) => item.lineNumber <= lineNumber);
+  return match?.level ?? null;
+}
+
+function resolveHeadingIndentVar(level: number | null) {
+  if (!level) {
+    return '0px';
+  }
+  const normalized = Math.max(1, Math.min(6, level));
+  return `var(--preview-h${normalized}-indent)`;
 }
 
 function flattenText(node: ReactNode): string {
@@ -203,10 +220,15 @@ export const PreviewMarkdownContent = memo(function PreviewMarkdownContent({
         p: ({ node, ...props }) => {
           const paragraphText = flattenText(props.children).trim();
           const normalizedParagraphText = paragraphText.replace(/^\s*[.]\s*/, '');
+          const line = getNodeLine(node);
+          const anchorLevel = resolveHeadingAnchorLevel(headingLines, line);
+          const hierarchyAlignedStyle = NUMBER_HIERARCHY_LEADER_RE.test(normalizedParagraphText)
+            ? { marginLeft: resolveHeadingIndentVar(anchorLevel) }
+            : undefined;
           const imageMatch = normalizedParagraphText.match(IMAGE_LABEL_RE);
           if (imageMatch) {
             return (
-              <figure className="preview-inline-image preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={getNodeLine(node) ?? undefined}>
+              <figure className="preview-inline-image preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={line ?? undefined}>
                 <PreviewResolvedImage
                   rawPath={imageMatch[1]}
                   alt={normalizedParagraphText}
@@ -230,7 +252,7 @@ export const PreviewMarkdownContent = memo(function PreviewMarkdownContent({
                       className="preview-inline-image preview-line-target"
                       data-preview-line-target="true"
                       data-preview-select-root="true"
-                      data-render-line={getNodeLine(node) ?? undefined}
+                      data-render-line={line ?? undefined}
                     >
                       <PreviewResolvedImage
                         rawPath={match[1]}
@@ -245,10 +267,36 @@ export const PreviewMarkdownContent = memo(function PreviewMarkdownContent({
               );
             }
           }
-          return <p className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={getNodeLine(node) ?? undefined} {...props} />;
+          return <p className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={line ?? undefined} style={hierarchyAlignedStyle} {...props} />;
         },
         li: ({ node, ...props }) => <li className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={getNodeLine(node) ?? undefined} {...props} />,
         blockquote: ({ node, ...props }) => <blockquote className="preview-line-target" data-preview-line-target="true" data-preview-select-root="true" data-render-line={getNodeLine(node) ?? undefined} {...props} />,
+        ul: ({ node, ...props }) => {
+          const line = getNodeLine(node);
+          const anchorLevel = resolveHeadingAnchorLevel(headingLines, line);
+          return (
+            <ul
+              style={{
+                marginLeft: resolveHeadingIndentVar(anchorLevel),
+                paddingLeft: 'calc(1.45em + var(--preview-ul-indent))',
+              }}
+              {...props}
+            />
+          );
+        },
+        ol: ({ node, ...props }) => {
+          const line = getNodeLine(node);
+          const anchorLevel = resolveHeadingAnchorLevel(headingLines, line);
+          return (
+            <ol
+              style={{
+                marginLeft: resolveHeadingIndentVar(anchorLevel),
+                paddingLeft: 'calc(1.45em + var(--preview-ol-indent))',
+              }}
+              {...props}
+            />
+          );
+        },
         table: ({ ...props }) => <table data-preview-select-root="true" data-preview-table-root="true" {...props} />,
         tr: ({ node, ...props }) => <tr className="preview-line-target" data-preview-line-target="true" data-preview-table-row="true" data-render-line={getNodeLine(node) ?? undefined} {...props} />,
         img: ({ src, alt, ...props }) => {

@@ -38,6 +38,18 @@ const TRAINING_ACCESS_PASSWORD = 'jung25)(';
 const PREVIEW_SELECTION_MODE_STORAGE_KEY = 'eduplan-preview-selection-mode';
 const SEARCH_PANEL_SCOPE_STORAGE_KEY = 'edufixer-search-panel-scope';
 const EDITOR_SESSION_MAP_STORAGE_KEY = 'edufixer-editor-session-map';
+const WINDOW_MIN_WIDTH = 1180;
+const SIDEBAR_MIN_WIDTH = 244;
+const SIDEBAR_AUTO_COLLAPSE_GUARD = 5;
+const isReleaseBuild = !import.meta.env.DEV;
+
+function shouldAutoCollapseSidebar(currentSidebarWidth: number) {
+  const viewportWidth = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0);
+  if (viewportWidth <= (WINDOW_MIN_WIDTH + SIDEBAR_AUTO_COLLAPSE_GUARD)) {
+    return true;
+  }
+  return currentSidebarWidth <= (SIDEBAR_MIN_WIDTH + SIDEBAR_AUTO_COLLAPSE_GUARD);
+}
 
 function isEditableMode(mode: EditorMode) {
   return mode === 'render' || mode === 'markdown' || mode === 'html' || mode === 'wysiwyg' || mode === 'split';
@@ -129,6 +141,8 @@ export function App() {
   const [searchSelection, setSearchSelection] = useState<SearchSelectionState | null>(null);
   const [mlDatasetStats, setMlDatasetStats] = useState<MlDatasetStats | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => shouldAutoCollapseSidebar(sidebarWidth));
+  const wasNarrowViewportRef = useRef<boolean>(shouldAutoCollapseSidebar(sidebarWidth));
   const resetEditorSyncForDocumentRef = useRef<(initialLine: number) => void>(() => {});
   const setEditorModeForDocumentRef = useRef<(mode: EditorMode) => void>(() => {});
   const editorSessionMapRef = useRef<Record<string, StoredFileEditorSession>>({});
@@ -145,6 +159,34 @@ export function App() {
     if (view !== 'upload') clearUploadSelection();
     setActiveView(view);
     setActiveTab(tabId);
+  }
+
+  function handleOpenUploadFromActivityBar() {
+    if (isReleaseBuild) {
+      handleOpenUnimplementedModal();
+      return;
+    }
+    openView('upload');
+  }
+
+  function handleSelectActivityPanel(panel: PanelId) {
+    if (isReleaseBuild && (panel === 'report' || panel === 'review' || panel === 'dataset')) {
+      handleOpenUnimplementedModal();
+      return;
+    }
+    setActivePanel(panel);
+    if (sidebarCollapsed) {
+      setSidebarCollapsed(false);
+    }
+    if (panel === 'settings') {
+      openView('settings');
+    }
+    if (panel === 'review') {
+      openView('review');
+    }
+    if (panel === 'dataset') {
+      openView('dataset');
+    }
   }
 
   function openShellDocumentState(doc: ShellDocument, options?: { initialLine?: number }) {
@@ -315,6 +357,20 @@ export function App() {
       window.localStorage.setItem(SEARCH_PANEL_SCOPE_STORAGE_KEY, searchPanelState.scope);
     }
   }, [currentDocument, searchPanelState.scope]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const isNarrow = shouldAutoCollapseSidebar(sidebarWidth);
+      if (isNarrow && !wasNarrowViewportRef.current) {
+        setSidebarCollapsed(true);
+        setIsSidebarResizing(false);
+      }
+      wasNarrowViewportRef.current = isNarrow;
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [setIsSidebarResizing, sidebarWidth]);
 
   useEffect(() => {
     if (!currentDocument?.filePath || !isEditableMode(editorMode)) {
@@ -654,23 +710,14 @@ export function App() {
         <ActivityBar
           activePanel={effectiveActivePanel}
           activeView={activeView}
-          onOpenUpload={() => openView('upload')}
+          onOpenUpload={handleOpenUploadFromActivityBar}
           showMdMenu={showMdMenu}
-          onSelectPanel={(panel) => {
-            setActivePanel(panel);
-            if (panel === 'settings') {
-              openView('settings');
-            }
-            if (panel === 'review') {
-              openView('review');
-            }
-            if (panel === 'dataset') {
-              openView('dataset');
-            }
-          }}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          onSelectPanel={handleSelectActivityPanel}
         />
 
-        <div className="sidebar" id="sidebar" style={{ width: `${sidebarWidth}px` }}>
+        <div className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`} id="sidebar" style={{ width: sidebarCollapsed ? '0px' : `${sidebarWidth}px` }}>
           {effectiveActivePanel === 'explorer' ? (
             <ExplorerPanel
               onOpenView={openView}
@@ -763,11 +810,15 @@ export function App() {
         </div>
 
         <div
-          className="sidebar-resizer"
+          className={`sidebar-resizer ${sidebarCollapsed ? 'collapsed' : ''}`}
           role="separator"
           aria-orientation="vertical"
           aria-label="사이드바 너비 조절"
-          onMouseDown={() => setIsSidebarResizing(true)}
+          onMouseDown={() => {
+            if (!sidebarCollapsed) {
+              setIsSidebarResizing(true);
+            }
+          }}
         />
 
         <div className="editor-shell">
@@ -857,8 +908,8 @@ export function App() {
                 actionLabel={showMdMenu ? 'ML 위계체크' : null}
                 onAction={showMdMenu ? handleRunHierarchyCheck : null}
                 actionDisabled={!currentDocument?.filePath}
-                renderSyncMode={renderSyncMode}
-                onToggleRenderSyncMode={toggleRenderSyncMode}
+                renderSyncMode="sync"
+                onToggleRenderSyncMode={handleOpenUnimplementedModal}
                 onSelectLocationLine={(lineNumber) => navigateToDocumentLine(lineNumber, { selectPreviewLine: false })}
               />
             </div>
@@ -911,7 +962,7 @@ export function App() {
             <div className="font-color-modal-header">
               <div className="modal-title">미구현 안내</div>
             </div>
-            <div className="modal-body">해당 기능은 아직 구현되지 않았습니다.</div>
+            <div className="modal-body">개발중입니다.</div>
             <div className="modal-footer">
               <button className="btn btn-primary" onClick={handleCloseUnimplementedModal}>확인</button>
             </div>

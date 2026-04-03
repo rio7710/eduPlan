@@ -6,7 +6,7 @@ const SIDEBAR_WIDTH_STORAGE_KEY = 'eduplan-sidebar-width';
 export function useShellLayout() {
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-    return Number.isFinite(saved) && saved >= 220 ? saved : 340;
+    return Number.isFinite(saved) && saved >= 244 ? saved : 364;
   });
   const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -38,7 +38,7 @@ export function useShellLayout() {
     document.body.classList.add('is-resizing');
 
     const handleMouseMove = (event: MouseEvent) => {
-      const nextWidth = Math.max(220, Math.min(620, event.clientX - 60));
+      const nextWidth = Math.max(244, Math.min(620, event.clientX - 60));
       setSidebarWidth(nextWidth);
     };
     const handleMouseUp = () => setIsSidebarResizing(false);
@@ -61,14 +61,17 @@ export function useShellLayout() {
       root.style.setProperty(`--preview-${key}-font-family`, value.fontFamily);
       root.style.setProperty(`--preview-${key}-font-size`, `${value.fontSize}px`);
       root.style.setProperty(`--preview-${key}-color`, resolveFontColor(value.color, theme));
+      root.style.setProperty(`--preview-${key}-indent`, `${Math.max(0, Number(value.indent) || 0)}px`);
     });
 
     root.style.setProperty('--preview-ul-font-family', fontSettings.bullets.unordered.fontFamily);
     root.style.setProperty('--preview-ul-font-size', `${fontSettings.bullets.unordered.fontSize}px`);
     root.style.setProperty('--preview-ul-color', resolveFontColor(fontSettings.bullets.unordered.color, theme));
+    root.style.setProperty('--preview-ul-indent', `${Math.max(0, Number(fontSettings.bullets.unordered.indent) || 0)}px`);
     root.style.setProperty('--preview-ol-font-family', fontSettings.bullets.ordered.fontFamily);
     root.style.setProperty('--preview-ol-font-size', `${fontSettings.bullets.ordered.fontSize}px`);
     root.style.setProperty('--preview-ol-color', resolveFontColor(fontSettings.bullets.ordered.color, theme));
+    root.style.setProperty('--preview-ol-indent', `${Math.max(0, Number(fontSettings.bullets.ordered.indent) || 0)}px`);
   }, [fontSettings, theme]);
 
   useEffect(() => {

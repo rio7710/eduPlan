@@ -44,9 +44,12 @@ async function applyReferenceText(markdownPath, referencePath, replaceJsonPath) 
 
 function stripStandaloneImageLabelLines(markdownText) {
   const lines = String(markdownText || '').split(/\r?\n/);
-  const imageOnlyLineRe = /^\s*[.\-*\u25CB○]?\s*(?:\[\s*이미지\s+\d+:\s*[^\]]+\]\s*)+$/;
+  // Keep valid image references like "[이미지 1: image/foo.png]".
+  // Only remove malformed placeholders that do not point to image/ path.
+  const validImageRefLineRe = /^\s*[.\-*\u25CB○]?\s*(?:\[\s*이미지\s+\d+:\s*image\/[^\]]+\]\s*)+$/i;
+  const malformedImageRefLineRe = /^\s*[.\-*\u25CB○]?\s*(?:\[\s*이미지\s+\d+:\s*[^\]]*\]\s*)+$/;
   return lines
-    .filter((line) => !imageOnlyLineRe.test(line))
+    .filter((line) => !(malformedImageRefLineRe.test(line) && !validImageRefLineRe.test(line)))
     .join('\n');
 }
 
@@ -147,6 +150,40 @@ async function writeFinalMarkdown(pdfPath, pdfStem, markdownPath) {
   const content = await fs.readFile(markdownPath, 'utf8');
   await fs.writeFile(finalMarkdownPath, content, 'utf8');
   return { finalMarkdownPath, content };
+}
+
+async function resolveFinalStageMarkdownPath(mdDir, pdfStem, fallbackPath) {
+  let entries = [];
+  try {
+    entries = await fs.readdir(mdDir, { withFileTypes: true });
+  } catch {
+    return { markdownPath: fallbackPath, stage: 1 };
+  }
+
+  const stemSuffix = `_${String(pdfStem || '').toLowerCase()}.md`;
+  let best = { markdownPath: fallbackPath, stage: 1 };
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    const name = String(entry.name || '');
+    if (!name.toLowerCase().endsWith(stemSuffix)) {
+      continue;
+    }
+    const match = /^s(\d+)_/i.exec(name);
+    if (!match) {
+      continue;
+    }
+    const stage = Number(match[1] || 0);
+    if (!Number.isFinite(stage) || stage <= best.stage) {
+      continue;
+    }
+    best = {
+      markdownPath: path.join(mdDir, name),
+      stage,
+    };
+  }
+  return best;
 }
 
 async function copyStageImages(finalMarkdownPath, imageDir) {
@@ -265,7 +302,13 @@ function registerConvertPdfPythonHandler(ipcMain, db) {
       return await finalizeWithLog({ doc: null, reviewItems: [], error: result.error || result.stderr || 'python 실행 실패' });
     }
 
-    const markdownPath = path.join(outputPaths.mdDir, `s01_${outputPaths.pdfStem}.md`);
+    const s01MarkdownPath = path.join(outputPaths.mdDir, `s01_${outputPaths.pdfStem}.md`);
+    const finalStagePick = await resolveFinalStageMarkdownPath(
+      outputPaths.mdDir,
+      outputPaths.pdfStem,
+      s01MarkdownPath,
+    );
+    const markdownPath = finalStagePick.markdownPath;
     const rawMarkdownPath = path.join(outputPaths.mdDir, `s01_${outputPaths.pdfStem}_raw.md`);
     const reportPath = path.join(outputPaths.reportDir, `s03_${outputPaths.pdfStem}_report.md`);
     const mlReportPath = path.join(outputPaths.reportDir, `s04_${outputPaths.pdfStem}_ml_report.json`);
@@ -277,6 +320,10 @@ function registerConvertPdfPythonHandler(ipcMain, db) {
       let latestMlReportPath = '';
       let txtReplaceCount = 0;
 
+      recordProcess('stage_selected', {
+        markdownPath,
+        stage: finalStagePick.stage,
+      });
       await fs.copyFile(markdownPath, rawMarkdownPath);
       recordProcess('artifact', { kind: 'raw_markdown', path: rawMarkdownPath });
 

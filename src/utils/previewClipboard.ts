@@ -203,7 +203,17 @@ function hasMixedTableAndTextContent(fragment: DocumentFragment): boolean {
 }
 
 function stripLeadingNumbers(text: string): string {
-  return text.replace(/^\s*\d+[.)]\s+/gm, '');
+  const leadingMarkerRe = /^\s*(?:(?:[-*+]|[•·●○■□▶▷▸▹])|(?:[①-⑳㉑-㉟㊱-㊿])|(?:\(\d+\))|(?:\[\d+\])|(?:\d+[.)])|(?:\d+(?:[.-]\d+)+))\s+/u;
+  return text
+    .split('\n')
+    .map((line) => {
+      let normalized = line;
+      while (leadingMarkerRe.test(normalized)) {
+        normalized = normalized.replace(leadingMarkerRe, '');
+      }
+      return normalized;
+    })
+    .join('\n');
 }
 
 function normalizeTableSelection(range: Range, fragment: DocumentFragment): DocumentFragment {

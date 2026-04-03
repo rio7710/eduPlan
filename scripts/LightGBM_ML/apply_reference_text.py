@@ -12,10 +12,11 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from reference_page_alignment import align_reference_to_pages
 
-IMAGE_REF_RE = re.compile(r"^\[이미지\s+\d+:.+\]\s*$")
+IMAGE_REF_RE = re.compile(r"^\s*(?:[.\-*\u25CB○]\s*)?\[\s*이미지\s+\d+\s*:\s*[^\]]+\]\s*$")
 BULLET_RE = re.compile(r"^\s*(?:[○●ㆍ]|[-*+]\s|\d+[.)]\s)")
 PAGE_MARKER_RE = re.compile(r"^\s*-\s*\d+\s*-\s*$")
 RULE_LEADER_RE = re.compile(r"^\s*(?:[○●ㆍ※★]|[-*+]\s|\d+(?:-\d+)*[.)]?)")
+IMAGE_PLACEHOLDER_PREFIX = "__EDUFIX_IMAGE_REF__"
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,6 +29,29 @@ def parse_args() -> argparse.Namespace:
 
 def normalize(text: str) -> str:
     return "".join(char for char in text if not char.isspace())
+
+
+def is_image_ref_line(line: str) -> bool:
+    return IMAGE_REF_RE.match(line.strip()) is not None
+
+
+def mask_image_lines(lines: list[str]) -> tuple[list[str], dict[str, str]]:
+    masked_lines: list[str] = []
+    masked_map: dict[str, str] = {}
+    image_index = 0
+    for line in lines:
+        if not is_image_ref_line(line):
+            masked_lines.append(line)
+            continue
+        image_index += 1
+        token = f"{IMAGE_PLACEHOLDER_PREFIX}{image_index:04d}__"
+        masked_map[token] = line
+        masked_lines.append(token)
+    return masked_lines, masked_map
+
+
+def unmask_image_lines(lines: list[str], masked_map: dict[str, str]) -> list[str]:
+    return [masked_map.get(line, line) for line in lines]
 
 
 def build_reference_index(text: str) -> tuple[str, list[int]]:
@@ -55,11 +79,13 @@ def is_structural_line(line: str) -> bool:
     stripped = line.strip()
     if not stripped:
         return True
+    if stripped.startswith(IMAGE_PLACEHOLDER_PREFIX):
+        return True
     if PAGE_MARKER_RE.match(stripped):
         return True
     if stripped == "---":
         return True
-    if IMAGE_REF_RE.match(stripped):
+    if is_image_ref_line(stripped):
         return True
     return False
 
@@ -226,11 +252,14 @@ def merge_split_lines_two_line(
 
 def refine_markdown(markdown_text: str, reference_text: str) -> tuple[str, dict, list[dict]]:
     _page_aligned_text, page_summary = align_reference_to_pages(markdown_text, reference_text)
+    original_lines = markdown_text.splitlines()
+    masked_lines, masked_map = mask_image_lines(original_lines)
     reference_lines = build_reference_line_map(reference_text)
     merged_output, candidate_count, merged_count, chained_count, replacements = merge_split_lines_two_line(
-        markdown_text.splitlines(), reference_lines
+        masked_lines, reference_lines
     )
-    return "\n".join(merged_output) + ("\n" if markdown_text.endswith("\n") else ""), {
+    restored_output = unmask_image_lines(merged_output, masked_map)
+    return "\n".join(restored_output) + ("\n" if markdown_text.endswith("\n") else ""), {
         **page_summary,
         "matchedSegments": merged_count,
         "candidate2LineCount": candidate_count,

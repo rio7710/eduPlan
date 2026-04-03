@@ -104,6 +104,13 @@ async function clearArtifacts() {
     if (!entry.isFile()) {
       continue;
     }
+    const ext = path.extname(entry.name).toLowerCase();
+    if (entry.name === 'line_break_model.txt') {
+      continue;
+    }
+    if (!['.json', '.jsonl', '.csv'].includes(ext)) {
+      continue;
+    }
     const fullPath = path.join(artifactRoot, entry.name);
     try {
       const fileStat = await fs.stat(fullPath);

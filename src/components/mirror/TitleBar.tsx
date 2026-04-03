@@ -61,10 +61,6 @@ export function TitleBar({
               파일(F)
             </button>
             <div className="title-menu-dropdown">
-              <button type="button" className="title-menu-item" onClick={runMenuAction(onOpenUpload)}>
-                <span>새 문서</span>
-                <span className="title-menu-shortcut">Ctrl+N</span>
-              </button>
               <button type="button" className="title-menu-item" onClick={runMenuAction(onOpenFile)}>
                 <span>파일 열기</span>
                 <span className="title-menu-shortcut">Ctrl+O</span>

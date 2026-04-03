@@ -1,0 +1,13 @@
+{
+  "userRows": 70,
+  "synthRows": 5400,
+  "totalRows": 5470,
+  "trainRows": 4376,
+  "validRows": 1094,
+  "labelOrder": [
+    "keep_break",
+    "merge_space",
+    "merge_no_space"
+  ],
+  "validAccuracy": 0.9845
+}

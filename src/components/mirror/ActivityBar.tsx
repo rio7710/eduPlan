@@ -7,6 +7,8 @@ type Props = {
   onOpenUpload: () => void;
   onSelectPanel: (panel: PanelId) => void;
   showMdMenu: boolean;
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
 };
 
 function iconFolder() {
@@ -81,10 +83,38 @@ function iconUpload() {
   );
 }
 
-export function ActivityBar({ activePanel, activeView = 'welcome', onOpenUpload, onSelectPanel, showMdMenu }: Props) {
+function iconSidebarToggle() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M4 5h16v14H4z" />
+      <path d="M9 5v14" />
+      <path d="M13 12h5" />
+      <path d="M15 10l3 2-3 2" />
+    </svg>
+  );
+}
+
+export function ActivityBar({
+  activePanel,
+  activeView = 'welcome',
+  onOpenUpload,
+  onSelectPanel,
+  showMdMenu,
+  sidebarCollapsed = false,
+  onToggleSidebar,
+}: Props) {
   return (
     <div className="activitybar">
       <div className="activity-group top">
+        <DelayedTooltip content={sidebarCollapsed ? '사이드바 열기' : '사이드바 접기'}>
+          <button
+            className={`activity-btn ${sidebarCollapsed ? 'active' : ''}`}
+            data-panel="sidebar-toggle"
+            onClick={() => onToggleSidebar?.()}
+          >
+            {iconSidebarToggle()}
+          </button>
+        </DelayedTooltip>
         <DelayedTooltip content="File Explorer">
           <button className={`activity-btn ${activePanel === 'explorer' ? 'active' : ''}`} data-panel="explorer" onClick={() => onSelectPanel('explorer')}>
             {iconFolder()}

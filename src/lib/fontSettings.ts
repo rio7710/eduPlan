@@ -2,6 +2,7 @@ export type FontToken = {
   fontFamily: string;
   fontSize: number;
   color: string;
+  indent: number;
 };
 
 export type FontSettings = {
@@ -42,16 +43,16 @@ export const fontFamilyOptions = [
 
 export const defaultFontSettings: FontSettings = {
   headings: {
-    h1: { fontFamily: 'Pretendard', fontSize: 30, color: themeAwareAutoColorToken },
-    h2: { fontFamily: 'Pretendard', fontSize: 24, color: themeAwareAutoColorToken },
-    h3: { fontFamily: 'Pretendard', fontSize: 20, color: themeAwareAutoColorToken },
-    h4: { fontFamily: 'Pretendard', fontSize: 18, color: themeAwareAutoColorToken },
-    h5: { fontFamily: 'Pretendard', fontSize: 16, color: themeAwareAutoColorToken },
-    h6: { fontFamily: 'Pretendard', fontSize: 14, color: themeAwareAutoColorToken },
+    h1: { fontFamily: 'Pretendard', fontSize: 30, color: themeAwareAutoColorToken, indent: 0 },
+    h2: { fontFamily: 'Pretendard', fontSize: 24, color: themeAwareAutoColorToken, indent: 0 },
+    h3: { fontFamily: 'Pretendard', fontSize: 20, color: themeAwareAutoColorToken, indent: 0 },
+    h4: { fontFamily: 'Pretendard', fontSize: 18, color: themeAwareAutoColorToken, indent: 0 },
+    h5: { fontFamily: 'Pretendard', fontSize: 16, color: themeAwareAutoColorToken, indent: 0 },
+    h6: { fontFamily: 'Pretendard', fontSize: 14, color: themeAwareAutoColorToken, indent: 0 },
   },
   bullets: {
-    unordered: { fontFamily: 'Pretendard', fontSize: 16, color: themeAwareAutoColorToken },
-    ordered: { fontFamily: 'Pretendard', fontSize: 16, color: themeAwareAutoColorToken },
+    unordered: { fontFamily: 'Pretendard', fontSize: 16, color: themeAwareAutoColorToken, indent: 0 },
+    ordered: { fontFamily: 'Pretendard', fontSize: 16, color: themeAwareAutoColorToken, indent: 0 },
   },
 };
 

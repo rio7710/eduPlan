@@ -39,25 +39,13 @@ const colorPalette = [
 
 function FontControl({ label, value, theme, fontOptions, onChange }: FontControlProps) {
   const datalistId = `font-family-options-${label.replace(/\s+/g, '-').toLowerCase()}`;
-  const resolvedColor = resolveFontColor(value.color, theme);
   const [colorModalOpen, setColorModalOpen] = useState(false);
   const isAutoColor = value.color === themeAwareAutoColorToken;
+  const resolvedColor = resolveFontColor(value.color, theme);
 
   return (
-    <div className="font-token-card">
-      <div className="font-token-header">
-        <strong>{label}</strong>
-        <span
-          className="font-token-preview"
-          style={{
-            fontFamily: value.fontFamily,
-            fontSize: `${value.fontSize}px`,
-            color: resolvedColor,
-          }}
-        >
-          샘플 텍스트
-        </span>
-      </div>
+    <div className="font-control-row">
+      <div className="font-control-name">{label}</div>
       <div className="font-token-grid one-line">
         <label className="font-field">
           <span>폰트</span>
@@ -85,6 +73,17 @@ function FontControl({ label, value, theme, fontOptions, onChange }: FontControl
             className="settings-input"
             value={value.fontSize}
             onChange={(event) => onChange({ ...value, fontSize: Number(event.target.value) || 12 })}
+          />
+        </label>
+        <label className="font-field">
+          <span>위치</span>
+          <input
+            type="number"
+            min={0}
+            max={160}
+            className="settings-input"
+            value={Number(value.indent) || 0}
+            onChange={(event) => onChange({ ...value, indent: Math.max(0, Number(event.target.value) || 0) })}
           />
         </label>
         <label className="font-field">
@@ -267,7 +266,21 @@ export function SettingsView({ theme, onToggleTheme, fontSettings, onChangeFontS
         ) : (
           <>
             <div className="settings-section">
-              <div className="settings-section-title">헤더 폰트 설정</div>
+              <div className="settings-section-title">폰트 미리보기</div>
+              <div className="font-preview-board">
+                <div style={{ fontFamily: fontSettings.headings.h1.fontFamily, fontSize: `${fontSettings.headings.h1.fontSize}px`, color: resolveFontColor(fontSettings.headings.h1.color, theme), marginLeft: `${fontSettings.headings.h1.indent || 0}px` }}>H1 텍스트</div>
+                <div style={{ fontFamily: fontSettings.headings.h2.fontFamily, fontSize: `${fontSettings.headings.h2.fontSize}px`, color: resolveFontColor(fontSettings.headings.h2.color, theme), marginLeft: `${fontSettings.headings.h2.indent || 0}px` }}>H2 텍스트</div>
+                <div style={{ fontFamily: fontSettings.headings.h3.fontFamily, fontSize: `${fontSettings.headings.h3.fontSize}px`, color: resolveFontColor(fontSettings.headings.h3.color, theme), marginLeft: `${fontSettings.headings.h3.indent || 0}px` }}>H3 텍스트</div>
+                <div style={{ fontFamily: fontSettings.headings.h4.fontFamily, fontSize: `${fontSettings.headings.h4.fontSize}px`, color: resolveFontColor(fontSettings.headings.h4.color, theme), marginLeft: `${fontSettings.headings.h4.indent || 0}px` }}>H4 텍스트</div>
+                <div style={{ fontFamily: fontSettings.headings.h5.fontFamily, fontSize: `${fontSettings.headings.h5.fontSize}px`, color: resolveFontColor(fontSettings.headings.h5.color, theme), marginLeft: `${fontSettings.headings.h5.indent || 0}px` }}>H5 텍스트</div>
+                <div style={{ fontFamily: fontSettings.headings.h6.fontFamily, fontSize: `${fontSettings.headings.h6.fontSize}px`, color: resolveFontColor(fontSettings.headings.h6.color, theme), marginLeft: `${fontSettings.headings.h6.indent || 0}px` }}>H6 텍스트</div>
+                <div style={{ fontFamily: fontSettings.bullets.unordered.fontFamily, fontSize: `${fontSettings.bullets.unordered.fontSize}px`, color: resolveFontColor(fontSettings.bullets.unordered.color, theme), paddingLeft: `${fontSettings.bullets.unordered.indent || 0}px` }}>블릿1 텍스트</div>
+                <div style={{ fontFamily: fontSettings.bullets.unordered.fontFamily, fontSize: `${fontSettings.bullets.unordered.fontSize}px`, color: resolveFontColor(fontSettings.bullets.unordered.color, theme), paddingLeft: `${fontSettings.bullets.unordered.indent || 0}px` }}>블릿2 텍스트</div>
+                <div style={{ fontFamily: fontSettings.bullets.ordered.fontFamily, fontSize: `${fontSettings.bullets.ordered.fontSize}px`, color: resolveFontColor(fontSettings.bullets.ordered.color, theme), paddingLeft: `${fontSettings.bullets.ordered.indent || 0}px` }}>블릿3 텍스트</div>
+              </div>
+            </div>
+            <div className="settings-section">
+              <div className="settings-section-title">폰트 설정</div>
               <div className="font-settings-body">
                 <FontControl
                   label="H1"
@@ -311,12 +324,6 @@ export function SettingsView({ theme, onToggleTheme, fontSettings, onChangeFontS
                   fontOptions={fontOptions}
                   onChange={(next) => onChangeFontSettings({ ...fontSettings, headings: { ...fontSettings.headings, h6: next } })}
                 />
-              </div>
-            </div>
-
-            <div className="settings-section">
-              <div className="settings-section-title">블릿 폰트 설정</div>
-              <div className="font-settings-body">
                 <FontControl
                   label="글머리표 목록"
                   value={fontSettings.bullets.unordered}

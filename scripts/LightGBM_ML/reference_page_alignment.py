@@ -7,6 +7,9 @@ import re
 IMAGE_REF_RE = re.compile(r"^\[이미지\s+\d+:.+\]\s*$")
 PAGE_MARKER_RE = re.compile(r"^\s*-\s*\d+\s*-\s*$")
 PAGE_BREAK = "---"
+TABLE_HEADER_RE = re.compile(r"(?:^|\s)구분(?:\s|$)")
+TABLE_COMPARE_RE = re.compile(r"국내기준|NFPA\s*101", re.IGNORECASE)
+TABLE_ROW_HINT_RE = re.compile(r"(기준\s*높이|기준점|분류|지상층\s*기준|지하층\s*기준)")
 
 
 def normalize(text: str) -> str:
@@ -41,6 +44,17 @@ def split_markdown_pages(markdown_text: str) -> list[MarkdownPage]:
         text_lines.append(line)
     pages.append(MarkdownPage(text_lines=text_lines, image_lines=image_lines))
     return pages
+
+
+def is_table_risk_page(lines: list[str]) -> bool:
+    meaningful = [line.strip() for line in lines if line.strip() and not is_ignored_line(line)]
+    if not meaningful:
+        return False
+    joined = " ".join(meaningful)
+    has_compare_header = bool(TABLE_HEADER_RE.search(joined) and TABLE_COMPARE_RE.search(joined))
+    row_hint_count = sum(1 for line in meaningful if TABLE_ROW_HINT_RE.search(line))
+    short_line_count = sum(1 for line in meaningful if len(line) <= 28)
+    return has_compare_header and (row_hint_count >= 2 or short_line_count >= max(4, len(meaningful) // 3))
 
 
 def build_reference_lines(reference_text: str) -> list[str]:
@@ -102,7 +116,11 @@ def align_reference_to_pages(markdown_text: str, reference_text: str) -> tuple[s
         end = find_best_end(page_norm, ref_lines, cursor, index == len(pages) - 1)
         page_slice = ref_lines[cursor:end]
         cursor = end
-        replaced_lines = attach_images(page_slice, page.image_lines)
+        if is_table_risk_page(page.text_lines):
+            # Keep original markdown for table-like pages to avoid irreversible row/column collapse.
+            replaced_lines = attach_images(page.text_lines, page.image_lines)
+        else:
+            replaced_lines = attach_images(page_slice, page.image_lines)
         rendered_pages.append("\n".join(replaced_lines).strip())
         aligned_pages += 1
 
