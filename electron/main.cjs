@@ -1,4 +1,5 @@
 const { app, BrowserWindow } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
 const { autoUpdater } = require('electron-updater');
 
@@ -14,6 +15,18 @@ const { registerFolderHandlers } = require('./handlers/folderHandler.cjs');
 let mainWindow = null;
 const rendererDevUrl = process.env.VITE_DEV_SERVER_URL;
 let updateTimer = null;
+
+function resolveRendererEntryFile() {
+  const distDir = path.join(__dirname, '..', 'dist');
+  const candidates = ['index_vite_backup.html', 'index.html'];
+  for (const name of candidates) {
+    const fullPath = path.join(distDir, name);
+    if (fs.existsSync(fullPath)) {
+      return fullPath;
+    }
+  }
+  return null;
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -53,7 +66,11 @@ async function createWindow() {
     await mainWindow.loadURL(rendererDevUrl);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    await mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    const entryFile = resolveRendererEntryFile();
+    if (!entryFile) {
+      throw new Error('Renderer entry file not found in dist');
+    }
+    await mainWindow.loadFile(entryFile);
   }
 
   setupAutoUpdater();
