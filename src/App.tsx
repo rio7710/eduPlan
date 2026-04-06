@@ -603,6 +603,7 @@ export function App() {
     normalizeSessionEditorMode,
     setEditorMode,
     hydrateRecentDocuments,
+    openExternalFiles: handleDropOpenFiles,
     openShellDocument,
     refreshPersistedExplorerFolder,
     refreshPersistedLogoReviewItems,

@@ -242,6 +242,7 @@ interface SyncStatus {
 interface Window {
   eduFixerApi?: {
     getShellState: () => Promise<{ isDesktop: boolean; recentDocuments: ShellDocument[] }>;
+    consumeLaunchPaths?: () => Promise<string[]>;
     getSystemFonts: () => Promise<string[]>;
     getSyncStatus: () => Promise<SyncStatus>;
     readFile: (filePath: string) => Promise<string>;
@@ -254,6 +255,7 @@ interface Window {
     openRecent: (filePath: string) => Promise<ShellDocument | null>;
     convertPdfWithPython: (filePath: string, inferenceEngine?: 'py_only' | 'py_lgbm', sensitivity?: 'low' | 'default' | 'high') => Promise<PdfConversionResult | null>;
     onPdfConvertProgress?: (callback: (payload: PdfConvertProgress) => void) => (() => void) | void;
+    onLaunchPaths?: (callback: (paths: string[]) => void) => (() => void) | void;
     analyzeHierarchyPatterns: (markdownPath: string) => Promise<HierarchyPatternReviewItem[]>;
     getMlDatasetStats: () => Promise<MlDatasetStats>;
     getMlDatasetPreview: () => Promise<MlDatasetPreviewData>;

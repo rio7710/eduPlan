@@ -18,6 +18,7 @@ type UseAppBootstrapParams = {
   normalizeSessionEditorMode: (mode: unknown) => EditorMode;
   setEditorMode: (mode: EditorMode) => void;
   hydrateRecentDocuments: (docs: ShellDocument[]) => void;
+  openExternalFiles: (paths: string[]) => Promise<void> | void;
   openShellDocument: (doc: ShellDocument, options?: { initialLine?: number }) => void;
   refreshPersistedExplorerFolder: (includeSubfolders?: boolean) => Promise<void> | void;
   refreshPersistedLogoReviewItems: () => Promise<void> | void;
@@ -42,6 +43,7 @@ export function useAppBootstrap({
   normalizeSessionEditorMode,
   setEditorMode,
   hydrateRecentDocuments,
+  openExternalFiles,
   openShellDocument,
   refreshPersistedExplorerFolder,
   refreshPersistedLogoReviewItems,
@@ -70,6 +72,13 @@ export function useAppBootstrap({
     void refreshSentenceReviewItems();
     void refreshMlDatasetStats();
     void refreshSyncStatus();
+  });
+
+  const openExternalFilesEvent = useEffectEvent((paths: string[]) => {
+    if (!paths.length) {
+      return;
+    }
+    void openExternalFiles(paths);
   });
 
   useEffect(() => {
@@ -124,6 +133,29 @@ export function useAppBootstrap({
     void loadShellStateAndRestoreEditorSession(disposedRef);
     return () => {
       disposedRef.current = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    void window.eduFixerApi?.consumeLaunchPaths?.().then((paths) => {
+      if (!active || !Array.isArray(paths) || !paths.length) {
+        return;
+      }
+      openExternalFilesEvent(paths);
+    });
+
+    const unsubscribe = window.eduFixerApi?.onLaunchPaths?.((paths) => {
+      if (!active || !Array.isArray(paths) || !paths.length) {
+        return;
+      }
+      openExternalFilesEvent(paths);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe?.();
     };
   }, []);
 

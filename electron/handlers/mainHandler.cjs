@@ -4,8 +4,12 @@ const fs = require('node:fs/promises');
 const { getDb } = require('../lib/dbEngine.cjs');
 const { toIsoNow } = require('../lib/utils.cjs');
 
-function registerMainHandlers(mainWindow) {
+function registerMainHandlers(mainWindow, options = {}) {
   const db = getDb();
+  const consumeLaunchPaths =
+    typeof options.consumeLaunchPaths === 'function'
+      ? options.consumeLaunchPaths
+      : () => [];
 
   // 앱 상태 조회
   ipcMain.handle('app:get-shell-state', () => {
@@ -59,6 +63,8 @@ function registerMainHandlers(mainWindow) {
       return null;
     }
   });
+
+  ipcMain.handle('app:consume-launch-paths', () => consumeLaunchPaths());
 
   ipcMain.handle('app:filter-existing-paths', async (_event, paths) => {
     if (!Array.isArray(paths)) {

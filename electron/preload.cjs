@@ -3,6 +3,7 @@ const { clipboard, contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('eduFixerApi', {
   isDesktop: true,
   getShellState: () => ipcRenderer.invoke('app:get-shell-state'),
+  consumeLaunchPaths: () => ipcRenderer.invoke('app:consume-launch-paths'),
   getSystemFonts: () => ipcRenderer.invoke('app:get-system-fonts'),
   getSyncStatus: () => ipcRenderer.invoke('app:get-sync-status'),
   readFile: (filePath) => ipcRenderer.invoke('app:read-file', filePath),
@@ -18,6 +19,11 @@ contextBridge.exposeInMainWorld('eduFixerApi', {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('document:convert-progress', listener);
     return () => ipcRenderer.removeListener('document:convert-progress', listener);
+  },
+  onLaunchPaths: (callback) => {
+    const listener = (_event, paths) => callback(Array.isArray(paths) ? paths : []);
+    ipcRenderer.on('app:launch-paths', listener);
+    return () => ipcRenderer.removeListener('app:launch-paths', listener);
   },
   runPdfExtractStage: (filePath, stage) => ipcRenderer.invoke('document:run-pdf-extract-stage', filePath, stage),
   analyzeHierarchyPatterns: (markdownPath) => ipcRenderer.invoke('document:analyze-hierarchy-patterns', markdownPath),

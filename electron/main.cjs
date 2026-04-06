@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { autoUpdater } = require('electron-updater');
 
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 // 초기화 및 핸들러 임포트
 const { ensureDatabase } = require('./lib/dbEngine.cjs');
 const { registerFileHandlers } = require('./handlers/fileHandler.cjs');
@@ -15,6 +17,59 @@ const { registerFolderHandlers } = require('./handlers/folderHandler.cjs');
 let mainWindow = null;
 const rendererDevUrl = process.env.VITE_DEV_SERVER_URL;
 let updateTimer = null;
+let launchFileQueue = [];
+
+function queueLaunchPaths(paths) {
+  if (!Array.isArray(paths) || !paths.length) {
+    return;
+  }
+
+  const nextQueue = new Set(launchFileQueue);
+  for (const filePath of paths) {
+    if (typeof filePath === 'string' && filePath) {
+      nextQueue.add(filePath);
+    }
+  }
+  launchFileQueue = Array.from(nextQueue);
+}
+
+function consumeLaunchPaths() {
+  const queued = [...launchFileQueue];
+  launchFileQueue = [];
+  return queued;
+}
+
+function extractLaunchPaths(argv = []) {
+  return argv
+    .slice(1)
+    .filter((value) => typeof value === 'string' && value && !value.startsWith('-'))
+    .map((value) => path.resolve(value))
+    .filter((value) => {
+      try {
+        return fs.existsSync(value) && fs.statSync(value).isFile();
+      } catch {
+        return false;
+      }
+    });
+}
+
+function focusMainWindow() {
+  if (!mainWindow) {
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function dispatchLaunchPaths(paths) {
+  if (!mainWindow || !paths.length) {
+    return;
+  }
+  mainWindow.webContents.send('app:launch-paths', paths);
+}
 
 function resolveRendererEntryFile() {
   const distDir = path.join(__dirname, '..', 'dist');
@@ -31,6 +86,23 @@ function resolveRendererEntryFile() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
+
+queueLaunchPaths(extractLaunchPaths(process.argv));
+
+app.on('second-instance', (_event, argv) => {
+  const launchPaths = extractLaunchPaths(argv);
+  queueLaunchPaths(launchPaths);
+  focusMainWindow();
+  dispatchLaunchPaths(launchPaths);
+});
+
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  const launchPath = path.resolve(filePath);
+  queueLaunchPaths([launchPath]);
+  focusMainWindow();
+  dispatchLaunchPaths([launchPath]);
+});
 
 async function createWindow() {
   ensureDatabase();
@@ -51,7 +123,7 @@ async function createWindow() {
 
   // 모든 기능 핸들러 등록
   registerFileHandlers(mainWindow);
-  registerMainHandlers(mainWindow);
+  registerMainHandlers(mainWindow, { consumeLaunchPaths });
   registerDocumentHandlers(mainWindow);
   registerReviewHandlers(mainWindow);
   registerDatasetHandlers(mainWindow);

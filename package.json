@@ -1,6 +1,6 @@
 {
   "name": "edufixer",
-  "version": "0.1.5",
+  "version": "0.1.6-b",
   "private": true,
   "main": "electron/main.cjs",
   "type": "module",
@@ -22,7 +22,7 @@
   "build": {
     "appId": "net.enaru.edufixer",
     "productName": "edufixer",
-    "asar": true,
+    "asar": false,
     "directories": {
       "output": "release"
     },
@@ -40,6 +40,23 @@
         "filter": [
           "**/*"
         ]
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "md",
+        "name": "Markdown Document",
+        "role": "Editor"
+      },
+      {
+        "ext": "txt",
+        "name": "Text Document",
+        "role": "Editor"
+      },
+      {
+        "ext": "pdf",
+        "name": "PDF Document",
+        "role": "Viewer"
       }
     ],
     "win": {
