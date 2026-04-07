@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 type Props = {
+  appVersion: string;
   onOpenUpload: () => void;
   onOpenFile: () => void;
   onOpenFolder: () => void;
@@ -15,6 +16,7 @@ type Props = {
 };
 
 export function TitleBar({
+  appVersion,
   onOpenUpload,
   onOpenFile,
   onOpenFolder,
@@ -112,7 +114,7 @@ export function TitleBar({
           </div>
         </div>
       </div>
-      <div className="titlebar-center">eduFixer for enaru.net</div>
+      <div className="titlebar-center">{`eduFixer v${appVersion} for enaru.net`}</div>
       <div className="titlebar-right">
         <button
           type="button"

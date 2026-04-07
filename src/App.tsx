@@ -29,6 +29,7 @@ import { useAppCommands } from '@/hooks/useAppCommands';
 import { useAppBootstrap } from '@/hooks/useAppBootstrap';
 import { getParentFolderPath } from '@/utils/textUtils';
 import { nextIfChanged, patchIfChanged } from '@/utils/stateUtils';
+import packageJson from '../package.json';
 
 export type PanelId = 'explorer' | 'md-menu' | 'search' | 'report' | 'review' | 'dataset' | 'settings';
 export type ViewId = 'welcome' | 'upload' | 'editor' | 'review' | 'dataset' | 'settings';
@@ -694,6 +695,7 @@ export function App() {
       }}
     >
       <TitleBar
+        appVersion={packageJson.version}
         onOpenUpload={() => openView('upload')}
         onOpenFile={handleOpenFile}
         onOpenFolder={handleOpenFolder}
