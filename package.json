@@ -1,6 +1,6 @@
 {
   "name": "edufixer",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "main": "electron/main.cjs",
   "type": "module",
@@ -22,6 +22,7 @@
   "build": {
     "appId": "net.enaru.edufixer",
     "productName": "edufixer",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "asar": false,
     "directories": {
       "output": "release"
