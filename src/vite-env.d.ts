@@ -86,7 +86,12 @@ interface HierarchyPatternReviewItem {
   status: 'pending' | 'approved' | 'rejected';
   patternKind: 'fixed_section' | 'numeric_heading' | 'symbol_heading' | 'repeated_header';
   candidateText: string;
+  patternSummary?: string;
   recommendationLabel: string;
+  recommendationSource?: 'PY' | 'ML' | 'ML&PY';
+  mlScore?: number | null;
+  mlAction?: 'approve' | 'change' | 'reject' | null;
+  mlRecommendedLabel?: string | null;
   finalLabel?: string;
   sampleTexts: string[];
   sampleLines: number[];
@@ -245,6 +250,7 @@ interface Window {
     consumeLaunchPaths?: () => Promise<string[]>;
     getSystemFonts: () => Promise<string[]>;
     getSyncStatus: () => Promise<SyncStatus>;
+    getPathForFile?: (file: File) => string;
     readFile: (filePath: string) => Promise<string>;
     filterExistingPaths: (paths: string[]) => Promise<string[]>;
     openPath: (targetPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
@@ -256,7 +262,7 @@ interface Window {
     convertPdfWithPython: (filePath: string, inferenceEngine?: 'py_only' | 'py_lgbm', sensitivity?: 'low' | 'default' | 'high') => Promise<PdfConversionResult | null>;
     onPdfConvertProgress?: (callback: (payload: PdfConvertProgress) => void) => (() => void) | void;
     onLaunchPaths?: (callback: (paths: string[]) => void) => (() => void) | void;
-    analyzeHierarchyPatterns: (markdownPath: string) => Promise<HierarchyPatternReviewItem[]>;
+    analyzeHierarchyPatterns: (markdownPath: string, lineStart?: number, lineEnd?: number, focusLine?: number) => Promise<HierarchyPatternReviewItem[]>;
     getMlDatasetStats: () => Promise<MlDatasetStats>;
     getMlDatasetPreview: () => Promise<MlDatasetPreviewData>;
     prepareMlTraining: (minPairs?: number) => Promise<MlTrainingPrepareResult>;

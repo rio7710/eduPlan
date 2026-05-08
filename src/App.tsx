@@ -13,12 +13,13 @@ import { TabsBar } from '@/components/mirror/TabsBar';
 import { TitleBar } from '@/components/mirror/TitleBar';
 import { ToastLayer } from '@/components/mirror/ToastLayer';
 import { EditorView } from '@/components/mirror/views/EditorView';
+import { selectHierarchyCandidate } from '@/components/preview/selectHierarchyCandidate';
 import { DatasetView } from '@/components/mirror/views/DatasetView';
 import { ReviewView } from '@/components/mirror/views/ReviewView';
 import { SettingsView } from '@/components/mirror/views/SettingsView';
 import { UploadView } from '@/components/mirror/views/UploadView';
 import { WelcomeView } from '@/components/mirror/views/WelcomeView';
-import { getCollapsedHeadingOwnerLine } from '@/lib/headingSections';
+import { getCollapsedHeadingOwnerLine, getHeadingSections } from '@/lib/headingSections';
 import { useDocumentSession } from '@/hooks/useDocumentSession';
 import { useEditorSync, type EditorMode } from '@/hooks/useEditorSync';
 import { useReviewState } from '@/hooks/useReviewState';
@@ -69,6 +70,10 @@ function normalizeSessionEditorMode(mode: unknown): EditorMode {
     return mode;
   }
   return 'render';
+}
+
+function isMarkdownPath(filePath: string) {
+  return filePath.toLowerCase().endsWith('.md');
 }
 
 type SearchPanelState = {
@@ -140,12 +145,14 @@ export function App() {
     selectedIndex: 0,
   });
   const [searchSelection, setSearchSelection] = useState<SearchSelectionState | null>(null);
+  const [inlineHierarchyItem, setInlineHierarchyItem] = useState<HierarchyPatternReviewItem | null>(null);
   const [mlDatasetStats, setMlDatasetStats] = useState<MlDatasetStats | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => shouldAutoCollapseSidebar(sidebarWidth));
   const wasNarrowViewportRef = useRef<boolean>(shouldAutoCollapseSidebar(sidebarWidth));
   const resetEditorSyncForDocumentRef = useRef<(initialLine: number) => void>(() => {});
   const setEditorModeForDocumentRef = useRef<(mode: EditorMode) => void>(() => {});
+  const selectedPreviewLineRef = useRef<ReturnType<typeof useEditorSync>['selectedPreviewLine']>(null);
   const editorSessionMapRef = useRef<Record<string, StoredFileEditorSession>>({});
   const hadDocumentRef = useRef(false);
   if (!Object.keys(editorSessionMapRef.current).length) {
@@ -256,6 +263,26 @@ export function App() {
       window.localStorage.setItem(EDITOR_SESSION_MAP_STORAGE_KEY, JSON.stringify(nextSessions));
     },
   });
+
+  const handleCloseActiveTab = useEffectEvent(() => {
+    if (activeTab === 'welcome') {
+      return;
+    }
+    handleCloseTab(activeTab);
+  });
+
+  useEffect(() => {
+    function handleWindowKeydown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w') {
+        event.preventDefault();
+        handleCloseActiveTab();
+      }
+    }
+
+    window.addEventListener('keydown', handleWindowKeydown);
+    return () => window.removeEventListener('keydown', handleWindowKeydown);
+  }, [handleCloseActiveTab]);
+
   const {
     appendLogoReviewItems,
     handleApproveAllReviewItems,
@@ -308,13 +335,22 @@ export function App() {
     toggleRenderSyncMode,
     resetForOpenedDocument,
   } = useEditorSync({ activeView, currentDocument });
+  selectedPreviewLineRef.current = selectedPreviewLine;
+
+  const handleSelectPreviewLine = useCallback((selection: typeof selectedPreviewLine) => {
+    selectedPreviewLineRef.current = selection;
+    setSelectedPreviewLine(selection);
+  }, [setSelectedPreviewLine]);
   const {
+    currentExplorerPath,
     explorerFolder,
     includeExplorerSubfolders,
     refreshPersistedExplorerFolder,
     handleDeleteExplorerFile,
     handleOpenExplorerFile,
     handleOpenFolder,
+    setCurrentExplorerPath,
+    setExplorerFolder,
     handleToggleExplorerSubfolders,
   } = useExplorerState({
     onOpenView: openView,
@@ -531,17 +567,46 @@ export function App() {
     if (!currentDocument?.filePath?.toLowerCase().endsWith('.md')) {
       return;
     }
+    const selectedSelection = selectedPreviewLineRef.current ?? resolveLiveRenderSelection();
+    const selectedText = selectedSelection?.selectedText?.trim() ?? '';
+    setToastMessage(selectedSelection
+      ? `선택 감지: ${selectedSelection.line}-${selectedSelection.endLine ?? selectedSelection.line} / ${selectedText.slice(0, 24)}`
+      : '선택 감지 실패');
+    if (!selectedSelection || !selectedText) {
+      window.alert('먼저 Render 화면에서 검토할 범위를 드래그 선택하세요.');
+      return;
+    }
 
     try {
-      const items = await window.eduFixerApi?.analyzeHierarchyPatterns(currentDocument.filePath);
+      if (editorMode !== 'render') {
+        changeEditorMode('render');
+      }
+      const activeLine = resolveHierarchyCheckLine({
+        editorMode,
+        locationSurface,
+        currentEditorLine,
+        currentPreviewLine,
+        currentRenderLocationLine,
+      });
+      const targetRange = {
+        startLine: Math.min(selectedSelection.line, selectedSelection.endLine ?? selectedSelection.line),
+        endLine: Math.max(selectedSelection.line, selectedSelection.endLine ?? selectedSelection.line),
+      };
+      const items = await window.eduFixerApi?.analyzeHierarchyPatterns(
+        currentDocument.filePath,
+        targetRange.startLine,
+        targetRange.endLine,
+        activeLine,
+      );
       if (!items?.length) {
-        window.alert('위계 패턴 후보를 찾지 못했습니다.');
+        window.alert(`선택 행 기준 위계 패턴 후보를 찾지 못했습니다.\n\n검사 범위: ${targetRange.startLine}-${targetRange.endLine}행`);
         return;
       }
 
       setHierarchyReviewItems(items);
-      setActivePanel('review');
-      openView('review');
+      const selectedItem = selectHierarchyCandidate(items, activeLine, selectedText);
+      setInlineHierarchyItem(selectedItem);
+      setToastMessage(selectedItem ? `선택 검토: ${selectedText.slice(0, 40)}` : '선택 범위를 검토했습니다.');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       window.alert(`위계 패턴 분석 실패\n\n${message}`);
@@ -552,6 +617,15 @@ export function App() {
     const uniquePaths = [...new Set(paths.map((value) => String(value || '').trim()).filter(Boolean))];
     if (!uniquePaths.length) {
       return;
+    }
+
+    const firstMarkdownFolderPath = getParentFolderPath(uniquePaths.find(isMarkdownPath));
+    if (firstMarkdownFolderPath) {
+      const folder = await window.eduFixerApi?.openFolderPath(firstMarkdownFolderPath, includeExplorerSubfolders);
+      if (folder) {
+        setExplorerFolder(folder);
+        setCurrentExplorerPath(firstMarkdownFolderPath);
+      }
     }
 
     for (const filePath of uniquePaths) {
@@ -723,12 +797,14 @@ export function App() {
         <div className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`} id="sidebar" style={{ width: sidebarCollapsed ? '0px' : `${sidebarWidth}px` }}>
           {effectiveActivePanel === 'explorer' ? (
             <ExplorerPanel
+              currentExplorerPath={currentExplorerPath}
               onOpenView={openView}
               onOpenFolder={handleOpenFolder}
               onOpenExplorerFolderPath={(folderPath) => {
                 void window.eduFixerApi?.openPath(folderPath);
               }}
               onOpenExplorerFile={handleOpenExplorerFile}
+              onOpenExplorerSubfolder={setCurrentExplorerPath}
               onDeleteExplorerFile={handleDeleteExplorerFile}
               includeSubfolders={includeExplorerSubfolders}
               onToggleIncludeSubfolders={handleToggleExplorerSubfolders}
@@ -760,7 +836,10 @@ export function App() {
                   setCurrentRenderLocationLine((current) => nextIfChanged(current, lineNumber));
                   setCurrentRenderMenuLine((current) => nextIfChanged(current, lineNumber));
                 }
-                navigateToDocumentLine(lineNumber, { selectPreviewLine: false });
+                navigateToDocumentLine(lineNumber, {
+                  selectPreviewLine: false,
+                  forceRenderScroll: editorMode === 'render',
+                });
               }}
             />
           ) : null}
@@ -862,7 +941,7 @@ export function App() {
                 onChangePreviewSelectionMode={(mode) => {
                   setPreviewSelectionMode(mode);
                   if (mode !== 'block') {
-                    setSelectedPreviewLine(null);
+                    handleSelectPreviewLine(null);
                   }
                 }}
                 locationSurface={locationSurface}
@@ -889,7 +968,7 @@ export function App() {
                 onToggleCollapsedHeading={(lineNumber) => {
                   setCollapsedHeadingLines((current) => current.filter((value) => value !== lineNumber));
                 }}
-                onSelectPreviewLine={() => {}}
+                onSelectPreviewLine={handleSelectPreviewLine}
                 onEditorActiveLineChange={(line) => setCurrentEditorLine((current) => nextIfChanged(current, line))}
                 onPreviewActiveLineChange={(line) => {
                   if (editorMode === 'render') {
@@ -913,7 +992,22 @@ export function App() {
                 actionDisabled={!currentDocument?.filePath}
                 renderSyncMode="sync"
                 onToggleRenderSyncMode={handleOpenUnimplementedModal}
-                onSelectLocationLine={(lineNumber) => navigateToDocumentLine(lineNumber, { selectPreviewLine: false })}
+                onSelectLocationLine={(lineNumber) =>
+                  navigateToDocumentLine(lineNumber, {
+                    selectPreviewLine: false,
+                    forceRenderScroll: editorMode === 'render',
+                  })}
+                hierarchyPopoverItem={inlineHierarchyItem}
+                hierarchyPopoverSelectedRange={selectedPreviewLine}
+                onApproveHierarchyPopover={(item, finalLabel) => {
+                  void handleResolveReviewItem({ ...item, finalLabel }, 'approve');
+                  setInlineHierarchyItem(null);
+                }}
+                onRejectHierarchyPopover={(item) => {
+                  void handleResolveReviewItem(item, 'reject');
+                  setInlineHierarchyItem(null);
+                }}
+                onCloseHierarchyPopover={() => setInlineHierarchyItem(null)}
               />
             </div>
 
@@ -1117,4 +1211,66 @@ function clipMonitorText(value: string, maxLength = 400) {
     return text;
   }
   return `${text.slice(0, maxLength)}...[${text.length - maxLength} more chars]`;
+}
+
+function resolveHierarchyCheckLine({
+  editorMode,
+  locationSurface,
+  currentEditorLine,
+  currentPreviewLine,
+  currentRenderLocationLine,
+}: {
+  editorMode: EditorMode;
+  locationSurface: 'Edit' | 'Render' | 'Menu' | null;
+  currentEditorLine: number | null;
+  currentPreviewLine: number | null;
+  currentRenderLocationLine: number | null;
+}) {
+  const preferredLine = editorMode === 'render'
+    ? currentRenderLocationLine
+    : locationSurface === 'Render'
+      ? currentPreviewLine
+      : currentEditorLine;
+  const numeric = Number(preferredLine ?? currentPreviewLine ?? currentEditorLine ?? 1);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 1;
+}
+
+function resolveHierarchyCheckRange(content: string, activeLine: number) {
+  const sections = getHeadingSections(content);
+  const section = sections.find((item) => activeLine >= item.lineNumber && activeLine <= item.endLine);
+  if (section) {
+    return { startLine: section.lineNumber, endLine: section.endLine };
+  }
+  return { startLine: activeLine, endLine: activeLine };
+}
+
+function resolveLiveRenderSelection() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return null;
+  }
+  const range = selection.getRangeAt(0);
+  const startElement =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement ?? null;
+  const endElement =
+    range.endContainer instanceof Element
+      ? range.endContainer
+      : range.endContainer.parentElement ?? null;
+  const startLine = Number(startElement?.closest<HTMLElement>('[data-render-line]')?.dataset.renderLine || 0);
+  const endLine = Number(endElement?.closest<HTMLElement>('[data-render-line]')?.dataset.renderLine || 0);
+  const selectedText = selection.toString().trim();
+  if (startLine <= 0 || endLine <= 0 || !selectedText) {
+    return null;
+  }
+  const line = Math.min(startLine, endLine);
+  const resolvedEndLine = Math.max(startLine, endLine);
+  return {
+    line,
+    endLine: resolvedEndLine,
+    activeLine: line,
+    label: resolvedEndLine > line ? `${line}-${resolvedEndLine}행 선택` : `${line}행 선택`,
+    selectedText,
+  };
 }

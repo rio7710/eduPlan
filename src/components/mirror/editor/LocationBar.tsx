@@ -44,6 +44,7 @@ export function LocationBar({
   onSelectLocationLine = null,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const actionMouseHandledRef = useRef(false);
   const [openLine, setOpenLine] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; line: number } | null>(null);
   const fileName = document?.fileName ?? '문서 제목.md';
@@ -150,7 +151,25 @@ export function LocationBar({
           </button>
         ) : null}
         {actionLabel && onAction ? (
-          <button className="secondary-button location-inline-action" onClick={onAction} disabled={actionDisabled}>
+          <button
+            className="secondary-button location-inline-action"
+            onMouseDown={(event) => {
+              if (actionDisabled) {
+                return;
+              }
+              event.preventDefault();
+              actionMouseHandledRef.current = true;
+              onAction();
+            }}
+            onClick={() => {
+              if (actionMouseHandledRef.current) {
+                actionMouseHandledRef.current = false;
+                return;
+              }
+              onAction();
+            }}
+            disabled={actionDisabled}
+          >
             {actionLabel}
           </button>
         ) : null}

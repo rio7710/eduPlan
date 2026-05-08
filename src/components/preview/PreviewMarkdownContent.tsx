@@ -6,6 +6,8 @@ import remarkGfm from 'remark-gfm';
 const IMAGE_LABEL_RE = /^\[이미지\s+\d+:\s*([^\]]+)\]\s*$/;
 const IMAGE_LABEL_CAPTURE_RE = /\[이미지\s+\d+:\s*([^\]]+)\]/g;
 const NUMBER_HIERARCHY_LEADER_RE = /^(?:[①-⑳㉑-㉟㊱-㊿⓵-⓾]|\(?\d+\)?[.)])\s*/;
+const LEADING_RENDER_LABEL_RE = /^\s*(?:\[[^\]\s\r\n][^\]\r\n]{0,40}\]|\([^) \r\n][^)\r\n]{0,40}\)|\{[^}\r\n]+\}|【[^】\r\n]+】|〈[^〉\r\n]+〉|《[^》\r\n]+》|「[^」\r\n]+」|『[^』\r\n]+』)\s*[:：]?\s*/u;
+const LEADING_RENDER_LABEL_TOKEN_RE = /^(?:\[[^\]\s\r\n][^\]\r\n]{0,40}\]|\([^) \r\n][^)\r\n]{0,40}\)|\{[^}\r\n]+\}|【[^】\r\n]+】|〈[^〉\r\n]+〉|《[^》\r\n]+》|「[^」\r\n]+」|『[^』\r\n]+』)\s*[:：]?\s*/u;
 
 type HeadingLine = {
   level: number;
@@ -17,6 +19,7 @@ type Props = {
   markdownText: string;
   documentPath: string | null;
   headingLines: HeadingLine[];
+  hideLabels?: boolean;
 };
 
 function escapeHtmlAttribute(value: string) {
@@ -25,6 +28,10 @@ function escapeHtmlAttribute(value: string) {
     .replaceAll('"', '&quot;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
+}
+
+function escapeHtmlText(value: string) {
+  return escapeHtmlAttribute(value);
 }
 
 function extractImageLabelsFromLine(line: string): string[] {
@@ -40,22 +47,183 @@ function extractImageLabelsFromLine(line: string): string[] {
   return matches.map((match) => match[1].trim()).filter(Boolean);
 }
 
-function buildPreviewMarkdown(markdownText: string) {
-  return markdownText
-    .split(/\r?\n/)
-    .map((line) => {
-      const imageLabels = extractImageLabelsFromLine(line);
-      if (imageLabels.length > 0) {
-        return imageLabels
+function normalizeLabelTone(label: string) {
+  const normalized = label.trim().toLowerCase();
+  if (!normalized) {
+    return 'neutral';
+  }
+  if (/(목표|학습목표|도달목표)/u.test(normalized)) {
+    return 'goal';
+  }
+  if (/(흐름|순서|로드맵|과정|단계)/u.test(normalized)) {
+    return 'flow';
+  }
+  if (/(배경|도입|맥락)/u.test(normalized)) {
+    return 'context';
+  }
+  if (/(개념|정의|원리|핵심)/u.test(normalized)) {
+    return 'concept';
+  }
+  if (/(예시|사례|적용|실전|실습)/u.test(normalized)) {
+    return 'example';
+  }
+  if (/(질문|활동|탐구|토의|생각)/u.test(normalized)) {
+    return 'question';
+  }
+  if (/(주의|오답|오해|오류|경고)/u.test(normalized)) {
+    return 'warning';
+  }
+  if (/(출처|참고자료|참고|링크)/u.test(normalized)) {
+    return 'source';
+  }
+  if (/(요약|정리|결론|연결)/u.test(normalized)) {
+    return 'summary';
+  }
+  if (/(표준|기준|규칙|절차|체크)/u.test(normalized)) {
+    return 'standard';
+  }
+  return 'neutral';
+}
+
+function unwrapLabelToken(token: string) {
+  return token.slice(1, -1).trim();
+}
+
+function splitLeadingRenderLabelsFromLine(line: string) {
+  let rest = line;
+  let prefix = '';
+  const labels: string[] = [];
+
+  const indentMatch = rest.match(/^(\s*)(.*)$/);
+  if (indentMatch) {
+    prefix += indentMatch[1];
+    rest = indentMatch[2];
+  }
+
+  const quoteMatch = rest.match(/^((?:>\s*)+)(.*)$/);
+  if (quoteMatch) {
+    prefix += quoteMatch[1];
+    rest = quoteMatch[2];
+  }
+
+  const headingMatch = rest.match(/^(#{1,6}\s+)(.*)$/);
+  if (headingMatch) {
+    prefix += headingMatch[1];
+    rest = headingMatch[2];
+  } else {
+    const listMatch = rest.match(/^((?:[-*+]|(?:\d+[.)])|(?:[①-⑳㉑-㉟㊱-㊿⓵-⓾]))\s+)(.*)$/u);
+    if (listMatch) {
+      prefix += listMatch[1];
+      rest = listMatch[2];
+    }
+  }
+
+  while (true) {
+    const labelMatch = rest.match(LEADING_RENDER_LABEL_TOKEN_RE);
+    if (!labelMatch) {
+      break;
+    }
+    const token = labelMatch[0].trim().replace(/[:：]\s*$/u, '').trim();
+    const label = unwrapLabelToken(token);
+    if (!label) {
+      break;
+    }
+    labels.push(label);
+    rest = rest.slice(labelMatch[0].length);
+  }
+
+  return {
+    prefix,
+    labels,
+    body: rest.trim(),
+  };
+}
+
+function stripLeadingRenderLabels(text: string) {
+  let normalized = text;
+  while (LEADING_RENDER_LABEL_RE.test(normalized)) {
+    normalized = normalized.replace(LEADING_RENDER_LABEL_RE, '');
+  }
+  return normalized;
+}
+
+function stripLeadingRenderLabelsFromLine(line: string) {
+  const { prefix, labels, body } = splitLeadingRenderLabelsFromLine(line);
+  const stripped = labels.length > 0 ? body : stripLeadingRenderLabels(line).trim();
+  if (!stripped) {
+    return '';
+  }
+  return prefix + stripped;
+}
+
+function renderLeadingRenderLabelsFromLine(line: string) {
+  const { prefix, labels, body } = splitLeadingRenderLabelsFromLine(line);
+  if (labels.length === 0) {
+    return line;
+  }
+  const labelHtml = labels
+    .map((label) => {
+      const tone = normalizeLabelTone(label);
+      return `<span class="preview-leading-label-pill tone-${tone}" data-preview-leading-label="${escapeHtmlAttribute(label)}">${escapeHtmlText(label)}</span>`;
+    })
+    .join('');
+  const suffix = body ? ` ${body}` : '';
+  return `${prefix}<span class="preview-leading-label-row">${labelHtml}</span>${suffix}`;
+}
+
+function buildPreviewMarkdownWithOptions(markdownText: string, hideLabels: boolean) {
+  const lines = markdownText.split(/\r?\n/);
+  const normalizedLines: string[] = [];
+  let inTableBlock = false;
+  let inCodeFence = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const isFenceLine = /^(```|~~~)/.test(trimmed);
+
+    if (isFenceLine) {
+      inCodeFence = !inCodeFence;
+      normalizedLines.push(line);
+      continue;
+    }
+
+    if (inCodeFence) {
+      normalizedLines.push(line);
+      continue;
+    }
+
+    if (trimmed.toLowerCase().startsWith('<table')) {
+      inTableBlock = true;
+    }
+
+    if (inTableBlock) {
+      if (trimmed) {
+        normalizedLines.push(trimmed);
+      }
+      if (trimmed.toLowerCase().endsWith('</table>')) {
+        inTableBlock = false;
+      }
+      continue;
+    }
+
+    const imageLabels = extractImageLabelsFromLine(line);
+    if (imageLabels.length > 0) {
+      normalizedLines.push(
+        imageLabels
           .map((label, index) => {
             const escaped = escapeHtmlAttribute(label);
             return `<figure class="preview-inline-image"><img src="${escaped}" alt="${escaped}" style="max-width:100%;height:auto;border-radius:8px;" /><figcaption>[이미지 ${index + 1}: ${escaped}]</figcaption></figure>`;
           })
-          .join('\n');
-      }
-      return line ? `${line}  ` : '';
-    })
-    .join('\n');
+          .join('\n'),
+      );
+      continue;
+    }
+
+    const visibleLine = hideLabels ? stripLeadingRenderLabelsFromLine(line) : renderLeadingRenderLabelsFromLine(line);
+    normalizedLines.push(visibleLine ? `${visibleLine}  ` : '');
+  }
+
+  return normalizedLines.join('\n');
 }
 
 function getNodeLine(node: { position?: { start?: { line?: number } } } | undefined) {
@@ -185,8 +353,9 @@ export const PreviewMarkdownContent = memo(function PreviewMarkdownContent({
   markdownText,
   documentPath,
   headingLines,
+  hideLabels = false,
 }: Props) {
-  const previewMarkdown = buildPreviewMarkdown(markdownText);
+  const previewMarkdown = buildPreviewMarkdownWithOptions(markdownText, hideLabels);
   return (
     <ReactMarkdown
       rehypePlugins={[rehypeRaw]}
@@ -311,4 +480,5 @@ export const PreviewMarkdownContent = memo(function PreviewMarkdownContent({
 }, (prev, next) =>
   prev.markdownText === next.markdownText
   && prev.documentPath === next.documentPath
-  && prev.headingLines === next.headingLines);
+  && prev.headingLines === next.headingLines
+  && prev.hideLabels === next.hideLabels);

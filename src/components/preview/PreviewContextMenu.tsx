@@ -3,9 +3,11 @@ type PreviewContextMenuProps = {
   y: number;
   autoCopy: boolean;
   stripNumbers: boolean;
+  stripLabels: boolean;
   onCopy: () => void;
   onToggleAutoCopy: () => void;
   onToggleStripNumbers: () => void;
+  onToggleStripLabels: () => void;
 };
 
 function Toggle({
@@ -26,9 +28,11 @@ export function PreviewContextMenu({
   y,
   autoCopy,
   stripNumbers,
+  stripLabels,
   onCopy,
   onToggleAutoCopy,
   onToggleStripNumbers,
+  onToggleStripLabels,
 }: PreviewContextMenuProps) {
   return (
     <div
@@ -50,6 +54,10 @@ export function PreviewContextMenu({
       <button type="button" className="preview-context-menu-item" role="menuitemcheckbox" aria-checked={stripNumbers} onClick={onToggleStripNumbers}>
         <span>숫자 제거</span>
         <Toggle enabled={stripNumbers} />
+      </button>
+      <button type="button" className="preview-context-menu-item" role="menuitemcheckbox" aria-checked={stripLabels} onClick={onToggleStripLabels}>
+        <span>라벨 숨기기</span>
+        <Toggle enabled={stripLabels} />
       </button>
     </div>
   );

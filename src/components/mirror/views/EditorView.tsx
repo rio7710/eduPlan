@@ -25,11 +25,11 @@ type Props = {
   scrollRequest?: { line: number; endLine?: number; startColumn?: number; endColumn?: number; token: number; target?: 'Edit' | 'Render' | 'Both'; editorLine?: number; previewLine?: number } | null;
   selectionRequest?: { line: number; token: number } | null;
   onSelectionRequestApplied?: () => void;
-  selectedPreviewLine?: { line: number; endLine?: number; activeLine?: number; label: string } | null;
+  selectedPreviewLine?: { line: number; endLine?: number; activeLine?: number; label: string; selectedText?: string } | null;
   searchSelection?: { lineNumber: number; start: number; end: number; query: string } | null;
   collapsedHeadingLines?: number[];
   onToggleCollapsedHeading?: (lineNumber: number) => void;
-  onSelectPreviewLine: (selection: { line: number; endLine?: number; activeLine?: number; label: string } | null) => void;
+  onSelectPreviewLine: (selection: { line: number; endLine?: number; activeLine?: number; label: string; selectedText?: string } | null) => void;
   onEditorActiveLineChange?: (line: number | null) => void;
   onPreviewActiveLineChange?: (line: number | null) => void;
   onRenderActiveLineChange?: (line: number | null) => void;
@@ -47,6 +47,11 @@ type Props = {
   renderSyncMode?: 'sync' | 'async';
   onToggleRenderSyncMode?: (() => void) | null;
   onSelectLocationLine?: ((lineNumber: number) => void) | null;
+  hierarchyPopoverItem?: HierarchyPatternReviewItem | null;
+  onApproveHierarchyPopover?: ((item: HierarchyPatternReviewItem, finalLabel: string) => void) | null;
+  onRejectHierarchyPopover?: ((item: HierarchyPatternReviewItem) => void) | null;
+  onCloseHierarchyPopover?: (() => void) | null;
+  hierarchyPopoverSelectedRange?: { line: number; endLine?: number; selectedText?: string } | null;
 };
 
 const turndown = new TurndownService();
@@ -244,6 +249,11 @@ export function EditorView({
   renderSyncMode = 'sync',
   onToggleRenderSyncMode = null,
   onSelectLocationLine = null,
+  hierarchyPopoverItem = null,
+  onApproveHierarchyPopover = null,
+  onRejectHierarchyPopover = null,
+  onCloseHierarchyPopover = null,
+  hierarchyPopoverSelectedRange = null,
 }: Props) {
   const content = document?.content ?? '';
   const htmlContent = useMemo(() => {
@@ -389,6 +399,12 @@ export function EditorView({
               searchSelection={searchSelection}
               scrollRequest={scrollRequest}
               onActiveLineChange={onRenderActiveLineChange}
+              onSelectedLineChange={onSelectPreviewLine}
+              hierarchyPopoverSelectedRange={hierarchyPopoverSelectedRange}
+              hierarchyPopoverItem={hierarchyPopoverItem}
+              onApproveHierarchyPopover={onApproveHierarchyPopover}
+              onRejectHierarchyPopover={onRejectHierarchyPopover}
+              onCloseHierarchyPopover={onCloseHierarchyPopover}
             />
           </div>
         </div>

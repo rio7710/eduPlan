@@ -24,6 +24,7 @@ export type SelectedPreviewLine = {
   endLine?: number;
   activeLine?: number;
   label: string;
+  selectedText?: string;
 };
 
 export type EditorSyncViewId = 'welcome' | 'upload' | 'editor' | 'review' | 'dataset' | 'settings';

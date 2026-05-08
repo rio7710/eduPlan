@@ -1,0 +1,19 @@
+{
+  "seedRows": 20,
+  "manualRows": 0,
+  "totalRows": 20,
+  "trainRows": 16,
+  "validRows": 4,
+  "validAccuracy": 0.0,
+  "labelCounts": {
+    "heading_1": 2,
+    "heading_2": 5,
+    "heading_3": 2,
+    "heading_4": 3,
+    "bullet_1": 2,
+    "bullet_2": 0,
+    "header_noise": 2,
+    "meta_noise": 2,
+    "page_number_noise": 2
+  }
+}

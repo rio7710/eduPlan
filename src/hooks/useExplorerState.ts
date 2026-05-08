@@ -3,6 +3,7 @@ import { isPdfPath } from '@/utils/textUtils';
 
 const LAST_EXPLORER_FOLDER_PATH_STORAGE_KEY = 'eduplan-last-explorer-folder-path';
 const EXPLORER_INCLUDE_SUBFOLDERS_STORAGE_KEY = 'eduplan-explorer-include-subfolders';
+const LAST_EXPLORER_CURRENT_PATH_STORAGE_KEY = 'eduplan-last-explorer-current-path';
 
 type UseExplorerStateOptions = {
   onOpenView: (view: 'welcome' | 'upload' | 'editor' | 'review' | 'dataset' | 'settings', tabId?: string) => void;
@@ -25,6 +26,9 @@ export function useExplorerState({
     return window.localStorage.getItem(EXPLORER_INCLUDE_SUBFOLDERS_STORAGE_KEY) !== 'off';
   });
   const [explorerFolder, setExplorerFolder] = useState<OpenFolderResult | null>(null);
+  const [currentExplorerPath, setCurrentExplorerPath] = useState<string | null>(() => {
+    return window.localStorage.getItem(LAST_EXPLORER_CURRENT_PATH_STORAGE_KEY);
+  });
 
   useEffect(() => {
     window.localStorage.setItem(EXPLORER_INCLUDE_SUBFOLDERS_STORAGE_KEY, includeExplorerSubfolders ? 'on' : 'off');
@@ -36,20 +40,36 @@ export function useExplorerState({
     }
   }, [explorerFolder?.path]);
 
+  useEffect(() => {
+    if (currentExplorerPath) {
+      window.localStorage.setItem(LAST_EXPLORER_CURRENT_PATH_STORAGE_KEY, currentExplorerPath);
+      return;
+    }
+    window.localStorage.removeItem(LAST_EXPLORER_CURRENT_PATH_STORAGE_KEY);
+  }, [currentExplorerPath]);
+
   async function refreshPersistedExplorerFolder(includeSubfolders = includeExplorerSubfolders) {
     const savedFolderPath = window.localStorage.getItem(LAST_EXPLORER_FOLDER_PATH_STORAGE_KEY);
     if (!savedFolderPath) {
       setExplorerFolder(null);
+      setCurrentExplorerPath(null);
       return;
     }
 
     const folder = await window.eduFixerApi?.openFolderPath(savedFolderPath, includeSubfolders);
     if (folder) {
       setExplorerFolder(folder);
+      setCurrentExplorerPath((current) => {
+        if (!current || !current.startsWith(folder.path)) {
+          return folder.path;
+        }
+        return current;
+      });
       return;
     }
 
     setExplorerFolder(null);
+    setCurrentExplorerPath(null);
   }
 
   async function handleOpenFolder() {
@@ -58,6 +78,7 @@ export function useExplorerState({
     window.localStorage.setItem(LAST_EXPLORER_FOLDER_PATH_STORAGE_KEY, folder.path);
     const refreshedFolder = await window.eduFixerApi?.openFolderPath(folder.path, includeExplorerSubfolders);
     setExplorerFolder(refreshedFolder ?? folder);
+    setCurrentExplorerPath(folder.path);
     onSetActivePanel('explorer');
   }
 
@@ -114,9 +135,11 @@ export function useExplorerState({
   }
 
   return {
+    currentExplorerPath,
     explorerFolder,
     includeExplorerSubfolders,
     refreshPersistedExplorerFolder,
+    setCurrentExplorerPath,
     setExplorerFolder,
     handleDeleteExplorerFile,
     handleOpenExplorerFile,

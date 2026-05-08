@@ -51,7 +51,10 @@ export function TitleBar({
     <div className="titlebar">
       <div className="titlebar-left">
         <span className="titlebar-icon">📚</span>
-        <span className="titlebar-title">edufixer</span>
+        <div className="titlebar-brand">
+          <span className="titlebar-title">edufixer</span>
+          <span className="titlebar-version">{`v${appVersion}`}</span>
+        </div>
         <div className="titlebar-menubar" ref={menuRootRef}>
           <div className={`title-menu ${openMenu === 'file' ? 'is-open' : ''}`}>
             <button
@@ -114,7 +117,7 @@ export function TitleBar({
           </div>
         </div>
       </div>
-      <div className="titlebar-center">{`eduFixer v${appVersion} for enaru.net`}</div>
+      <div className="titlebar-center">for enaru.net</div>
       <div className="titlebar-right">
         <button
           type="button"

@@ -1,4 +1,4 @@
-const { clipboard, contextBridge, ipcRenderer } = require('electron');
+const { clipboard, contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('eduFixerApi', {
   isDesktop: true,
@@ -6,6 +6,13 @@ contextBridge.exposeInMainWorld('eduFixerApi', {
   consumeLaunchPaths: () => ipcRenderer.invoke('app:consume-launch-paths'),
   getSystemFonts: () => ipcRenderer.invoke('app:get-system-fonts'),
   getSyncStatus: () => ipcRenderer.invoke('app:get-sync-status'),
+  getPathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return '';
+    }
+  },
   readFile: (filePath) => ipcRenderer.invoke('app:read-file', filePath),
   filterExistingPaths: (paths) => ipcRenderer.invoke('app:filter-existing-paths', paths),
   openPath: (targetPath) => ipcRenderer.invoke('app:open-path', targetPath),
@@ -26,7 +33,7 @@ contextBridge.exposeInMainWorld('eduFixerApi', {
     return () => ipcRenderer.removeListener('app:launch-paths', listener);
   },
   runPdfExtractStage: (filePath, stage) => ipcRenderer.invoke('document:run-pdf-extract-stage', filePath, stage),
-  analyzeHierarchyPatterns: (markdownPath) => ipcRenderer.invoke('document:analyze-hierarchy-patterns', markdownPath),
+  analyzeHierarchyPatterns: (markdownPath, lineStart, lineEnd, focusLine) => ipcRenderer.invoke('document:analyze-hierarchy-patterns', markdownPath, lineStart, lineEnd, focusLine),
   getMlDatasetStats: () => ipcRenderer.invoke('dataset:get-stats'),
   getMlDatasetPreview: () => ipcRenderer.invoke('dataset:get-preview'),
   prepareMlTraining: (minPairs = 500) => ipcRenderer.invoke('dataset:prepare-training', minPairs),

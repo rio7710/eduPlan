@@ -1,6 +1,11 @@
 export type PreviewClipboardOptions = {
   stripNumbers?: boolean;
+  stripLabels?: boolean;
 };
+
+const LEADING_LABEL_RE = /^\s*(?:\[[^\]\r\n]+\]\s*)+/u;
+const LABEL_STRIP_TARGET_SELECTOR = 'p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th, figcaption';
+const LEADING_BRACKET_LABEL_RE = /^\s*(?:\[[^\]\r\n]+\]|\([^) \r\n][^)\r\n]{0,40}\)|\{[^}\r\n]+\}|<[^>\r\n]+>|【[^】\r\n]+】|〈[^〉\r\n]+〉|《[^》\r\n]+》|「[^」\r\n]+」|『[^』\r\n]+』)\s*[:：]?\s*/u;
 
 function resolveElement(node: Node | null): Element | null {
   if (!node) {
@@ -216,6 +221,99 @@ function stripLeadingNumbers(text: string): string {
     .join('\n');
 }
 
+function stripLeadingLabelsInLine(line: string): string {
+  let normalized = line;
+  while (LEADING_LABEL_RE.test(normalized) || LEADING_BRACKET_LABEL_RE.test(normalized)) {
+    normalized = normalized
+      .replace(LEADING_LABEL_RE, '')
+      .replace(LEADING_BRACKET_LABEL_RE, '');
+  }
+  return normalized;
+}
+
+function stripLeadingCopyPrefixes(text: string, options: PreviewClipboardOptions): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      let normalized = line;
+      while (true) {
+        const next = options.stripNumbers
+          ? stripLeadingNumbers(options.stripLabels ? stripLeadingLabelsInLine(normalized) : normalized)
+          : options.stripLabels
+            ? stripLeadingLabelsInLine(normalized)
+            : normalized;
+        if (next === normalized) {
+          return normalized;
+        }
+        normalized = next;
+      }
+    })
+    .join('\n');
+}
+
+function stripLeadingPrefixesFromElement(element: HTMLElement, options: PreviewClipboardOptions): void {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let currentNode = walker.nextNode();
+  while (currentNode) {
+    const textNode = currentNode as Text;
+    const content = textNode.textContent ?? '';
+    if (!content.trim()) {
+      currentNode = walker.nextNode();
+      continue;
+    }
+
+    const stripped = stripLeadingCopyPrefixes(content, options);
+    if (stripped !== content) {
+      textNode.textContent = stripped;
+    }
+    return;
+  }
+}
+
+function stripLeadingPrefixesFromFragment(fragment: DocumentFragment, options: PreviewClipboardOptions): void {
+  for (const node of Array.from(fragment.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      node.textContent = stripLeadingCopyPrefixes(node.textContent ?? '', options);
+      continue;
+    }
+    if (node instanceof HTMLElement) {
+      const targets = [
+        ...(node.matches(LABEL_STRIP_TARGET_SELECTOR) ? [node] : []),
+        ...Array.from(node.querySelectorAll<HTMLElement>(LABEL_STRIP_TARGET_SELECTOR)),
+      ];
+      if (targets.length) {
+        targets.forEach((target) => stripLeadingPrefixesFromElement(target, options));
+        continue;
+      }
+      stripLeadingPrefixesFromElement(node, options);
+    }
+  }
+}
+
+function stripTrailingTerminalPeriodFromFragment(fragment: DocumentFragment): void {
+  const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
+  let currentNode = walker.nextNode();
+  let lastTextNode: Text | null = null;
+
+  while (currentNode) {
+    const textNode = currentNode as Text;
+    if ((textNode.textContent ?? '').trim()) {
+      lastTextNode = textNode;
+    }
+    currentNode = walker.nextNode();
+  }
+
+  if (!lastTextNode) {
+    return;
+  }
+
+  const content = lastTextNode.textContent ?? '';
+  const stripped = content.replace(/\.\s*$/u, '');
+  if (stripped !== content) {
+    lastTextNode.textContent = stripped;
+  }
+}
+
 function normalizeTableSelection(range: Range, fragment: DocumentFragment): DocumentFragment {
   const startElement = resolveElement(range.startContainer);
   const endElement = resolveElement(range.endContainer);
@@ -280,6 +378,27 @@ function serializeFragmentPlainText(fragment: DocumentFragment, fallbackPlain: s
   return lines.length ? lines.join('\n') : fallbackPlain.trim();
 }
 
+function extractRenderedPlainText(wrapper: HTMLDivElement, fallbackPlain: string): string {
+  if (!document.body) {
+    return fallbackPlain.trim();
+  }
+
+  const host = document.createElement('div');
+  host.setAttribute(
+    'style',
+    'position:fixed; left:-10000px; top:0; width:1200px; opacity:0; pointer-events:none; white-space:normal;',
+  );
+  host.appendChild(wrapper.cloneNode(true));
+  document.body.appendChild(host);
+
+  try {
+    const rendered = host.innerText || host.textContent || fallbackPlain;
+    return rendered.replace(/\r\n?/g, '\n').trim();
+  } finally {
+    document.body.removeChild(host);
+  }
+}
+
 export function buildPreviewClipboardPayload(
   selection: Selection,
   options: PreviewClipboardOptions = {},
@@ -290,6 +409,10 @@ export function buildPreviewClipboardPayload(
 
   const range = selection.getRangeAt(0);
   const fragment = normalizeTableSelection(range, range.cloneContents());
+  if (options.stripLabels || options.stripNumbers) {
+    stripLeadingPrefixesFromFragment(fragment, options);
+  }
+  stripTrailingTerminalPeriodFromFragment(fragment);
   normalizeCopiedBlockStyles(fragment);
   const hasMixedTableContent = hasMixedTableAndTextContent(fragment);
   const hasTable = Boolean(fragment.querySelector('table'));
@@ -300,9 +423,10 @@ export function buildPreviewClipboardPayload(
   wrapper.appendChild(fragment.cloneNode(true));
 
   const html = wrapper.innerHTML.trim();
-  const plain = options.stripNumbers
-    ? stripLeadingNumbers(serializeFragmentPlainText(fragment, selection.toString()))
-    : serializeFragmentPlainText(fragment, selection.toString());
+  const serializedPlain = hasTable && !hasMixedTableContent
+    ? serializeFragmentPlainText(fragment, selection.toString())
+    : extractRenderedPlainText(wrapper, selection.toString());
+  const plain = stripLeadingCopyPrefixes(serializedPlain, options);
   if (!plain && !html) {
     return null;
   }

@@ -72,6 +72,12 @@ export function useShellLayout() {
     root.style.setProperty('--preview-ol-font-size', `${fontSettings.bullets.ordered.fontSize}px`);
     root.style.setProperty('--preview-ol-color', resolveFontColor(fontSettings.bullets.ordered.color, theme));
     root.style.setProperty('--preview-ol-indent', `${Math.max(0, Number(fontSettings.bullets.ordered.indent) || 0)}px`);
+    root.style.setProperty('--preview-inline-code-font-family', fontSettings.code.inline.fontFamily);
+    root.style.setProperty('--preview-inline-code-font-size', `${fontSettings.code.inline.fontSize}px`);
+    root.style.setProperty('--preview-inline-code-color', resolveFontColor(fontSettings.code.inline.color, theme));
+    root.style.setProperty('--preview-code-block-font-family', fontSettings.code.block.fontFamily);
+    root.style.setProperty('--preview-code-block-font-size', `${fontSettings.code.block.fontSize}px`);
+    root.style.setProperty('--preview-code-block-color', resolveFontColor(fontSettings.code.block.color, theme));
   }, [fontSettings, theme]);
 
   useEffect(() => {
@@ -84,7 +90,7 @@ export function useShellLayout() {
 
   function parseDroppedFilePaths(event: DragEvent<HTMLDivElement>) {
     const fromFiles = Array.from(event.dataTransfer.files ?? [])
-      .map((file) => (file as File & { path?: string }).path)
+      .map((file) => window.eduFixerApi?.getPathForFile?.(file) ?? '')
       .filter((value): value is string => Boolean(value));
     if (fromFiles.length) return fromFiles;
 

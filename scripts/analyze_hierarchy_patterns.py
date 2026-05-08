@@ -32,11 +32,15 @@ PAGE_NUMBER = re.compile(r"^\d+$")
 PAGE_FRACTION = re.compile(r"^-\s*\d+\s*-$")
 IMAGE_LINE = re.compile(r"^\[이미지\s+\d+:")
 URL_LINE = re.compile(r"^https?://", re.IGNORECASE)
+MARKDOWN_HEADING = re.compile(r"^(#{1,6})\s+(.+)$")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Analyze hierarchy candidates from markdown.")
     parser.add_argument("--markdown", required=True, help="Markdown file path")
+    parser.add_argument("--line-start", type=int, default=1, help="Optional start line for scoped analysis")
+    parser.add_argument("--line-end", type=int, default=0, help="Optional end line for scoped analysis")
+    parser.add_argument("--focus-line", type=int, default=0, help="Optional active line to prioritize exact matches")
     return parser.parse_args()
 
 
@@ -49,9 +53,15 @@ def main() -> None:
     args = parse_args()
     markdown_path = Path(args.markdown).resolve()
     lines = markdown_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    line_start = max(1, int(args.line_start or 1))
+    line_end = int(args.line_end or 0)
+    focus_line = int(args.focus_line or 0)
+    scoped_end = line_end if line_end >= line_start else len(lines)
     content_lines: list[tuple[int, str]] = []
 
     for index, raw in enumerate(lines, start=1):
+        if index < line_start or index > scoped_end:
+            continue
         text = raw.strip()
         if not text or text == "---":
             continue
@@ -70,8 +80,49 @@ def main() -> None:
     items: list[dict] = []
     created_order = 1
 
+    def infer_selected_recommendation(selected_lines: list[str]) -> tuple[str, str, str]:
+        joined = " ".join(selected_lines).strip()
+        first = selected_lines[0].strip() if selected_lines else ""
+        heading_match = MARKDOWN_HEADING.match(first)
+        if heading_match:
+            return "fixed_section", f"heading_{len(heading_match.group(1))}", "선택 영역 직접 분석"
+        if PAGE_NUMBER.match(first) or PAGE_FRACTION.match(first):
+            return "fixed_section", "page_number_noise", "선택 영역 직접 분석"
+        if LECTURE_HEADING.match(first):
+            return "fixed_section", "heading_1", "선택 영역 직접 분석"
+        if BRACKET_SECTION.match(first):
+            return "fixed_section", "heading_2", "선택 영역 직접 분석"
+        if NUMERIC_SUB.match(first):
+            return "numeric_heading", "heading_3", "선택 영역 직접 분석"
+        if NUMERIC_MAIN.match(first):
+            return "numeric_heading", "heading_2", "선택 영역 직접 분석"
+        if NUMERIC_PAREN_SUB.match(first):
+            return "numeric_heading", "heading_4", "선택 영역 직접 분석"
+        if NUMERIC_PAREN_MAIN.match(first):
+            return "numeric_heading", "heading_3", "선택 영역 직접 분석"
+        if SYMBOL_TITLE.match(first) or TABLE_CAPTION.match(first):
+            return "symbol_heading", "heading_4", "선택 영역 직접 분석"
+        if SYMBOL_BULLET.match(first) or CIRCLED_ITEM.match(first):
+            return "symbol_heading", "bullet_1", "선택 영역 직접 분석"
+        if len(joined) >= 40:
+            return "fixed_section", "meta_noise", "선택 영역 직접 분석"
+        return "fixed_section", "heading_2", "선택 영역 직접 분석"
+
+    def focus_matches(matches: list[tuple[int, str]]) -> list[tuple[int, str]]:
+        if focus_line <= 0:
+            return matches
+        exact = [(line_no, text) for line_no, text in matches if line_no == focus_line]
+        if exact:
+            return exact
+        nearby = [(line_no, text) for line_no, text in matches if abs(line_no - focus_line) <= 2]
+        return nearby or matches
+
     def add_item(pattern_kind: str, candidate_text: str, recommendation_label: str, matches: list[tuple[int, str]]) -> None:
         nonlocal created_order
+        prioritized_matches = focus_matches(matches)
+        if not prioritized_matches:
+            return
+        candidate_preview = prioritized_matches[0][1] if focus_line > 0 else candidate_text
         items.append({
             "id": f"{markdown_path.name}:{pattern_kind}:{created_order}",
             "type": "hierarchy_pattern",
@@ -85,12 +136,40 @@ def main() -> None:
             "createdAt": "",
             "status": "pending",
             "patternKind": pattern_kind,
-            "candidateText": candidate_text,
+            "candidateText": candidate_preview,
+            "patternSummary": candidate_text,
             "recommendationLabel": recommendation_label,
-            "sampleTexts": [text for _, text in matches],
-            "sampleLines": [line_no for line_no, _ in matches],
+            "sampleTexts": [text for _, text in prioritized_matches],
+            "sampleLines": [line_no for line_no, _ in prioritized_matches],
         })
         created_order += 1
+
+    if line_start > 1 or scoped_end < len(lines):
+        selected_matches = [(line_no, text) for line_no, text in content_lines]
+        if selected_matches:
+            selected_texts = [text for _, text in selected_matches]
+            pattern_kind, recommendation_label, summary = infer_selected_recommendation(selected_texts)
+            items.append({
+                "id": f"{markdown_path.name}:selected_range:1",
+                "type": "hierarchy_pattern",
+                "sourcePdfName": markdown_path.name,
+                "sourcePdfPath": str(markdown_path),
+                "markdownPath": str(markdown_path),
+                "reviewDir": str(markdown_path.parent),
+                "previewImagePath": "",
+                "candidateCount": len(selected_matches),
+                "memberPaths": [],
+                "createdAt": "",
+                "status": "pending",
+                "patternKind": pattern_kind,
+                "candidateText": selected_texts[0],
+                "patternSummary": summary,
+                "recommendationLabel": recommendation_label,
+                "sampleTexts": selected_texts,
+                "sampleLines": [line_no for line_no, _ in selected_matches],
+            })
+            sys.stdout.write(json.dumps(items, ensure_ascii=False))
+            return
 
     for label, recommendation in FIXED_SECTION_LABELS.items():
         matches = [(line_no, text) for line_no, text in content_lines if text == label]

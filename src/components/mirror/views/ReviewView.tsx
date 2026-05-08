@@ -189,19 +189,24 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
             const isResolving = resolvingIds.includes(item.id);
             const selectedLabel = hierarchyLabels[item.id] ?? item.finalLabel ?? item.recommendationLabel;
             const isModified = selectedLabel !== item.recommendationLabel;
+            const recommendationSource = item.recommendationSource ?? 'PY';
+            const mlPercent = Math.round((item.mlScore ?? 0) * 100);
             return (
               <div key={item.id} className="review-card">
                 <div className="review-card-header">
                   <div className="review-meta">
                     <span className="action-badge keep">HIER</span>
-                    <span className="review-engine-badge py">PY</span>
+                    <span className={`review-engine-badge ${recommendationSource.toLowerCase().replace('&', '-')}`}>{recommendationSource}</span>
+                    {item.mlAction ? <span className="review-ml-badge">{`ML ${item.mlAction}`}</span> : null}
                     <span className="review-doc">{item.sourcePdfName}</span>
                     <span className="review-time">{pageNumber ? `p${pageNumber}` : '기타'}</span>
                     <span className="review-time">{item.createdAt.slice(0, 16).replace('T', ' ')}</span>
                   </div>
                   <div className="review-score">
-                    <span className="score-label">추천 라벨</span>
-                    <span className="score-value high">{item.recommendationLabel}</span>
+                    <span className="score-label">{item.mlScore != null ? '추천 점수' : '추천 라벨'}</span>
+                    <span className={`score-value ${item.mlScore != null && item.mlScore >= 0.75 ? 'high' : item.mlScore != null && item.mlScore >= 0.55 ? 'mid' : 'low'}`}>
+                      {item.mlScore != null ? `${mlPercent}%` : item.recommendationLabel}
+                    </span>
                   </div>
                 </div>
 
@@ -228,8 +233,20 @@ export function ReviewView({ items, onResolveItem, onApproveAll, onOpenEditorIte
                         <span className="logo-review-meta-value">{item.patternKind}</span>
                       </div>
                       <div className="logo-review-meta-row">
+                        <span className="logo-review-meta-label">패턴 요약</span>
+                        <span className="logo-review-meta-value">{item.patternSummary ?? item.candidateText}</span>
+                      </div>
+                      <div className="logo-review-meta-row">
                         <span className="logo-review-meta-label">추천 라벨</span>
                         <span className="logo-review-meta-value">{item.recommendationLabel}</span>
+                      </div>
+                      <div className="logo-review-meta-row">
+                        <span className="logo-review-meta-label">ML 추천</span>
+                        <span className="logo-review-meta-value">{item.mlAction ?? '-'}</span>
+                      </div>
+                      <div className="logo-review-meta-row">
+                        <span className="logo-review-meta-label">ML 라벨</span>
+                        <span className="logo-review-meta-value">{item.mlRecommendedLabel ?? '-'}</span>
                       </div>
                       <div className="logo-review-meta-row">
                         <span className="logo-review-meta-label">적용 라벨</span>

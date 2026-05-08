@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type ClipboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { HierarchyReviewPopover } from '@/components/preview/HierarchyReviewPopover';
 import type { PreviewSelectionMode } from '@/App';
 import { PreviewMarkdownContent } from '@/components/preview/PreviewMarkdownContent';
 import { PreviewContextMenu } from '@/components/preview/PreviewContextMenu';
@@ -57,6 +58,61 @@ function highlightPreviewSearchText(target: HTMLElement, query: string) {
   return false;
 }
 
+function readPreviewSelection(container: HTMLDivElement | null) {
+  const selection = window.getSelection();
+  if (!selection || !container || selection.rangeCount === 0 || selection.isCollapsed) {
+    return null;
+  }
+
+  const range = selection.getRangeAt(0);
+  const startNode = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+  const endNode = range.endContainer instanceof Element ? range.endContainer : range.endContainer.parentElement;
+  if (!startNode || !endNode || !container.contains(startNode) || !container.contains(endNode)) {
+    return null;
+  }
+
+  const selectedText = selection.toString().trim();
+  if (!selectedText) {
+    return null;
+  }
+
+  const intersectedLines = Array.from(
+    container.querySelectorAll<HTMLElement>('[data-preview-line-target="true"][data-render-line]'),
+  )
+    .filter((element) => {
+      try {
+        return range.intersectsNode(element);
+      } catch {
+        return false;
+      }
+    })
+    .map((element) => Number(element.dataset.renderLine || 0))
+    .filter((line) => Number.isFinite(line) && line > 0);
+
+  const fallbackStartLine = Number(
+    startNode.closest<HTMLElement>('[data-preview-line-target="true"]')?.dataset.renderLine || 0,
+  );
+  const fallbackEndLine = Number(
+    endNode.closest<HTMLElement>('[data-preview-line-target="true"]')?.dataset.renderLine || 0,
+  );
+  const lineNumbers = intersectedLines.length
+    ? intersectedLines
+    : [fallbackStartLine, fallbackEndLine].filter((line) => Number.isFinite(line) && line > 0);
+  if (!lineNumbers.length) {
+    return null;
+  }
+
+  const line = Math.min(...lineNumbers);
+  const resolvedEndLine = Math.max(...lineNumbers);
+  return {
+    line,
+    endLine: resolvedEndLine,
+    activeLine: line,
+    label: resolvedEndLine > line ? `${line}-${resolvedEndLine}행 선택` : `${line}행 선택`,
+    selectedText,
+  };
+}
+
 type ReactMarkdownPaneProps = {
   markdownText: string;
   documentPath?: string | null;
@@ -69,6 +125,12 @@ type ReactMarkdownPaneProps = {
   onLocationTrigger?: (kind: 'scroll' | 'keyboard') => void;
   onScrollRatioChange?: (ratio: number) => void;
   syncScrollRatio?: number | null;
+  onSelectedLineChange?: ((selection: { line: number; endLine?: number; activeLine?: number; label: string; selectedText?: string } | null) => void) | null;
+  hierarchyPopoverSelectedRange?: { line: number; endLine?: number; selectedText?: string } | null;
+  hierarchyPopoverItem?: HierarchyPatternReviewItem | null;
+  onApproveHierarchyPopover?: ((item: HierarchyPatternReviewItem, finalLabel: string) => void) | null;
+  onRejectHierarchyPopover?: ((item: HierarchyPatternReviewItem) => void) | null;
+  onCloseHierarchyPopover?: (() => void) | null;
 };
 
 function ReactMarkdownPaneComponent({
@@ -83,6 +145,12 @@ function ReactMarkdownPaneComponent({
   onLocationTrigger,
   onScrollRatioChange,
   syncScrollRatio = null,
+  onSelectedLineChange = null,
+  hierarchyPopoverSelectedRange = null,
+  hierarchyPopoverItem = null,
+  onApproveHierarchyPopover = null,
+  onRejectHierarchyPopover = null,
+  onCloseHierarchyPopover = null,
 }: ReactMarkdownPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const suppressScrollEmitRef = useRef(false);
@@ -92,6 +160,7 @@ function ReactMarkdownPaneComponent({
   const autoCopyToastTimerRef = useRef<number | null>(null);
   const autoCopyScheduleRef = useRef<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [hierarchyPopoverPosition, setHierarchyPopoverPosition] = useState<{ top: number; left: number } | null>(null);
   const [autoCopyEnabled, setAutoCopyEnabled] = useState(() => {
     const raw = window.localStorage.getItem(PREVIEW_CONTEXT_MENU_OPTIONS_STORAGE_KEY);
     if (!raw) {
@@ -110,6 +179,17 @@ function ReactMarkdownPaneComponent({
     }
     try {
       return JSON.parse(raw).stripNumbersEnabled === true;
+    } catch {
+      return false;
+    }
+  });
+  const [stripLabelsEnabled, setStripLabelsEnabled] = useState(() => {
+    const raw = window.localStorage.getItem(PREVIEW_CONTEXT_MENU_OPTIONS_STORAGE_KEY);
+    if (!raw) {
+      return false;
+    }
+    try {
+      return JSON.parse(raw).stripLabelsEnabled === true;
     } catch {
       return false;
     }
@@ -249,6 +329,33 @@ function ReactMarkdownPaneComponent({
 
   useEffect(() => {
     const container = containerRef.current;
+    if (!container || !hierarchyPopoverItem) {
+      setHierarchyPopoverPosition(null);
+      return;
+    }
+
+    const anchorLine = hierarchyPopoverItem.sampleLines[0] ?? null;
+    const anchor = anchorLine
+      ? container.querySelector<HTMLElement>(`[data-render-line="${anchorLine}"]`)
+      : null;
+    if (!anchor) {
+      setHierarchyPopoverPosition({ top: 24, left: 24 });
+      return;
+    }
+
+    const anchorRect = anchor.getBoundingClientRect();
+    const popoverWidth = Math.min(400, window.innerWidth - 24);
+    const popoverHeight = 260;
+    const preferAbove = anchorRect.top >= (popoverHeight + 16);
+    const top = preferAbove
+      ? anchorRect.top - popoverHeight - 12
+      : Math.min(window.innerHeight - popoverHeight - 12, anchorRect.bottom + 12);
+    const left = Math.max(12, Math.min(window.innerWidth - popoverWidth - 12, anchorRect.left));
+    setHierarchyPopoverPosition({ top, left });
+  }, [hierarchyPopoverItem, markdownText]);
+
+  useEffect(() => {
+    const container = containerRef.current;
     if (!container || syncScrollRatio === null || Number.isNaN(syncScrollRatio)) {
       return;
     }
@@ -283,9 +390,10 @@ function ReactMarkdownPaneComponent({
       JSON.stringify({
         autoCopyEnabled,
         stripNumbersEnabled,
+        stripLabelsEnabled,
       }),
     );
-  }, [autoCopyEnabled, stripNumbersEnabled]);
+  }, [autoCopyEnabled, stripNumbersEnabled, stripLabelsEnabled]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -351,6 +459,7 @@ function ReactMarkdownPaneComponent({
 
     const payload = buildPreviewClipboardPayload(selection, {
       stripNumbers: stripNumbersEnabled,
+      stripLabels: stripLabelsEnabled,
     });
     if (!payload) {
       return false;
@@ -472,6 +581,7 @@ function ReactMarkdownPaneComponent({
 
     const payload = buildPreviewClipboardPayload(selection, {
       stripNumbers: stripNumbersEnabled,
+      stripLabels: stripLabelsEnabled,
     });
     if (!payload) {
       return;
@@ -494,6 +604,7 @@ function ReactMarkdownPaneComponent({
 
   function handleMouseUp() {
     expandSelectionToLineTargets();
+    onSelectedLineChange?.(readPreviewSelection(containerRef.current));
     if (!autoCopyEnabled) {
       return;
     }
@@ -505,6 +616,22 @@ function ReactMarkdownPaneComponent({
       void copyCurrentSelection(true);
     }, 32);
   }
+
+  useEffect(() => {
+    function updateSelectionState() {
+      const selection = window.getSelection();
+      if (selection && !selectionBelongsToPreview(selection)) {
+        return;
+      }
+      const nextSelection = readPreviewSelection(containerRef.current);
+      if (nextSelection) {
+        onSelectedLineChange?.(nextSelection);
+      }
+    }
+
+    document.addEventListener('selectionchange', updateSelectionState);
+    return () => document.removeEventListener('selectionchange', updateSelectionState);
+  }, [onSelectedLineChange]);
 
   return (
     <>
@@ -519,23 +646,42 @@ function ReactMarkdownPaneComponent({
         onContextMenu={handleContextMenu}
       >
         {markdownText.trim() ? (
-          <PreviewMarkdownContent markdownText={markdownText} documentPath={documentPath} headingLines={headingLines} />
+          <PreviewMarkdownContent
+            markdownText={markdownText}
+            documentPath={documentPath}
+            headingLines={headingLines}
+            hideLabels={stripLabelsEnabled}
+          />
         ) : (
           <div className="empty-stage">미리볼 내용이 없습니다.</div>
         )}
       </div>
+      {hierarchyPopoverItem && hierarchyPopoverPosition ? (
+        <HierarchyReviewPopover
+          item={hierarchyPopoverItem}
+          top={hierarchyPopoverPosition.top}
+          left={hierarchyPopoverPosition.left}
+          documentText={markdownText}
+          selectedRange={hierarchyPopoverSelectedRange}
+          onApprove={(finalLabel) => onApproveHierarchyPopover?.(hierarchyPopoverItem, finalLabel)}
+          onReject={() => onRejectHierarchyPopover?.(hierarchyPopoverItem)}
+          onClose={() => onCloseHierarchyPopover?.()}
+        />
+      ) : null}
       {contextMenu ? (
         <PreviewContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
           autoCopy={autoCopyEnabled}
           stripNumbers={stripNumbersEnabled}
+          stripLabels={stripLabelsEnabled}
           onCopy={() => {
             void copyCurrentSelection();
             setContextMenu(null);
           }}
           onToggleAutoCopy={() => setAutoCopyEnabled((value) => !value)}
           onToggleStripNumbers={() => setStripNumbersEnabled((value) => !value)}
+          onToggleStripLabels={() => setStripLabelsEnabled((value) => !value)}
         />
       ) : null}
       <div className={`preview-copy-toast ${autoCopyToastVisible ? 'visible' : ''}`} role="status" aria-live="polite">
@@ -559,5 +705,10 @@ export const ReactMarkdownPane = memo(
     && prev.syncScrollRatio === next.syncScrollRatio
     && prev.scrollRequest?.token === next.scrollRequest?.token
     && prev.scrollRequest?.line === next.scrollRequest?.line
-    && prev.scrollRequest?.target === next.scrollRequest?.target,
+    && prev.scrollRequest?.target === next.scrollRequest?.target
+    && prev.onSelectedLineChange === next.onSelectedLineChange
+    && prev.hierarchyPopoverSelectedRange?.line === next.hierarchyPopoverSelectedRange?.line
+    && prev.hierarchyPopoverSelectedRange?.endLine === next.hierarchyPopoverSelectedRange?.endLine
+    && prev.hierarchyPopoverSelectedRange?.selectedText === next.hierarchyPopoverSelectedRange?.selectedText
+    && prev.hierarchyPopoverItem?.id === next.hierarchyPopoverItem?.id,
 );

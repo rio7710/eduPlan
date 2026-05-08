@@ -277,6 +277,11 @@ export function SettingsView({ theme, onToggleTheme, fontSettings, onChangeFontS
                 <div style={{ fontFamily: fontSettings.bullets.unordered.fontFamily, fontSize: `${fontSettings.bullets.unordered.fontSize}px`, color: resolveFontColor(fontSettings.bullets.unordered.color, theme), paddingLeft: `${fontSettings.bullets.unordered.indent || 0}px` }}>블릿1 텍스트</div>
                 <div style={{ fontFamily: fontSettings.bullets.unordered.fontFamily, fontSize: `${fontSettings.bullets.unordered.fontSize}px`, color: resolveFontColor(fontSettings.bullets.unordered.color, theme), paddingLeft: `${fontSettings.bullets.unordered.indent || 0}px` }}>블릿2 텍스트</div>
                 <div style={{ fontFamily: fontSettings.bullets.ordered.fontFamily, fontSize: `${fontSettings.bullets.ordered.fontSize}px`, color: resolveFontColor(fontSettings.bullets.ordered.color, theme), paddingLeft: `${fontSettings.bullets.ordered.indent || 0}px` }}>블릿3 텍스트</div>
+                <div style={{ fontFamily: fontSettings.bullets.unordered.fontFamily, fontSize: `${fontSettings.bullets.unordered.fontSize}px`, color: resolveFontColor(fontSettings.bullets.unordered.color, theme), paddingLeft: `${fontSettings.bullets.unordered.indent || 0}px` }}>• 데이터 수집 및 준비</div>
+                <div style={{ fontFamily: fontSettings.bullets.unordered.fontFamily, fontSize: `${fontSettings.bullets.unordered.fontSize}px`, color: resolveFontColor(fontSettings.bullets.unordered.color, theme), paddingLeft: `${fontSettings.bullets.unordered.indent || 0}px` }}>• 모델 학습</div>
+                <div style={{ fontFamily: fontSettings.bullets.unordered.fontFamily, fontSize: `${fontSettings.bullets.unordered.fontSize}px`, color: resolveFontColor(fontSettings.bullets.unordered.color, theme), paddingLeft: `${fontSettings.bullets.unordered.indent || 0}px` }}>• 평가</div>
+                <div style={{ fontFamily: fontSettings.code.inline.fontFamily, fontSize: `${fontSettings.code.inline.fontSize}px`, color: resolveFontColor(fontSettings.code.inline.color, theme) }}><code>{'`백틱 코드` 예시'}</code></div>
+                <pre style={{ fontFamily: fontSettings.code.block.fontFamily, fontSize: `${fontSettings.code.block.fontSize}px`, color: resolveFontColor(fontSettings.code.block.color, theme), margin: 0 }}><code>{'const stage = "모델 학습";'}</code></pre>
               </div>
             </div>
             <div className="settings-section">
@@ -337,6 +342,20 @@ export function SettingsView({ theme, onToggleTheme, fontSettings, onChangeFontS
                   theme={theme}
                   fontOptions={fontOptions}
                   onChange={(next) => onChangeFontSettings({ ...fontSettings, bullets: { ...fontSettings.bullets, ordered: next } })}
+                />
+                <FontControl
+                  label="인라인 코드"
+                  value={fontSettings.code.inline}
+                  theme={theme}
+                  fontOptions={fontOptions}
+                  onChange={(next) => onChangeFontSettings({ ...fontSettings, code: { ...fontSettings.code, inline: next } })}
+                />
+                <FontControl
+                  label="코드 블록"
+                  value={fontSettings.code.block}
+                  theme={theme}
+                  fontOptions={fontOptions}
+                  onChange={(next) => onChangeFontSettings({ ...fontSettings, code: { ...fontSettings.code, block: next } })}
                 />
               </div>
             </div>

@@ -11,6 +11,10 @@ export type FontSettings = {
     unordered: FontToken;
     ordered: FontToken;
   };
+  code: {
+    inline: FontToken;
+    block: FontToken;
+  };
 };
 
 export const themeAwareLightColor = '#111827';
@@ -54,6 +58,10 @@ export const defaultFontSettings: FontSettings = {
     unordered: { fontFamily: 'Pretendard', fontSize: 16, color: themeAwareAutoColorToken, indent: 0 },
     ordered: { fontFamily: 'Pretendard', fontSize: 16, color: themeAwareAutoColorToken, indent: 0 },
   },
+  code: {
+    inline: { fontFamily: '"Courier New"', fontSize: 15, color: themeAwareAutoColorToken, indent: 0 },
+    block: { fontFamily: '"Courier New"', fontSize: 14, color: themeAwareAutoColorToken, indent: 0 },
+  },
 };
 
 export function mergeFontSettings(input: Partial<FontSettings> | null | undefined): FontSettings {
@@ -69,6 +77,10 @@ export function mergeFontSettings(input: Partial<FontSettings> | null | undefine
     bullets: {
       unordered: { ...defaultFontSettings.bullets.unordered, ...input?.bullets?.unordered },
       ordered: { ...defaultFontSettings.bullets.ordered, ...input?.bullets?.ordered },
+    },
+    code: {
+      inline: { ...defaultFontSettings.code.inline, ...input?.code?.inline },
+      block: { ...defaultFontSettings.code.block, ...input?.code?.block },
     },
   };
 }
