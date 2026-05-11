@@ -1,6 +1,6 @@
 {
   "name": "edufixer",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "main": "electron/main.cjs",
   "type": "module",
@@ -67,8 +67,11 @@
       ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "EduFixer"
     },
     "publish": {
       "provider": "github",

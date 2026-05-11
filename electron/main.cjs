@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { autoUpdater } = require('electron-updater');
@@ -168,8 +168,20 @@ function setupAutoUpdater() {
     console.log('[auto-updater] no update available');
   });
 
-  autoUpdater.on('update-downloaded', (info) => {
+  autoUpdater.on('update-downloaded', async (info) => {
     console.log('[auto-updater] update downloaded:', info?.version || 'unknown');
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      buttons: ['지금 재시작', '나중에'],
+      defaultId: 0,
+      cancelId: 1,
+      title: '업데이트 준비 완료',
+      message: `EduFixer ${info?.version || '새 버전'} 업데이트가 준비되었습니다.`,
+      detail: '지금 재시작하면 업데이트를 설치합니다.',
+    });
+    if (result.response === 0) {
+      autoUpdater.quitAndInstall(false, true);
+    }
   });
 
   const checkUpdates = async () => {
