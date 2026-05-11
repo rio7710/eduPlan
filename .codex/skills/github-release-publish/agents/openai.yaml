@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Release Publish"
+  short_description: "Publish EduFixer patch releases to GitHub with updater assets."
+  default_prompt: "Publish the current EduFixer patch as a GitHub release with installer and auto-update assets."
